@@ -1,0 +1,9 @@
+{
+  "newStartPageToken": "page token go brrr",
+  "changes": [
+    {
+      "removed": true,
+      "fileId": "A"
+    }
+  ]
+}

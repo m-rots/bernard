@@ -1,0 +1,4 @@
+/bernard
+*.db
+.DS_Store
+/coverage.out

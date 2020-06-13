@@ -1,0 +1,13 @@
+{
+  "newStartPageToken": "page token!!",
+  "changes": [
+    {
+      "removed": false,
+      "driveId": "testDrive",
+      "drive": {
+        "id": "testDrive",
+        "name": "bernard go brrr"
+      }
+    }
+  ]
+}

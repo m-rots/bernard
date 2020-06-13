@@ -1,0 +1,17 @@
+{
+  "nextPageToken": "testdata/changed-content/pageToken2.json",
+  "newStartPageToken": "dont pick up this one!",
+  "changes": [
+    {
+      "removed": false,
+      "fileId": "Z",
+      "file": {
+        "id": "Z",
+        "driveId": "testDrive",
+        "parents": [
+          "testDrive"
+        ]
+      }
+    }
+  ]
+}

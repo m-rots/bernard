@@ -1,0 +1,19 @@
+{
+  "newStartPageToken": "page token go brrr",
+  "changes": [
+    {
+      "removed": false,
+      "fileId": "A",
+      "file": {
+        "id": "A",
+        "name": "folder A",
+        "mimeType": "application/vnd.google-apps.folder",
+        "trashed": false,
+        "driveId": "wrong drive",
+        "parents": [
+          "wrong drive"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "newStartPageToken": "page token go brrr",
+  "changes": [
+    {
+      "removed": false,
+      "fileId": "Y",
+      "file": {
+        "id": "Y",
+        "driveId": "testDrive",
+        "parents": [
+          "testDrive"
+        ]
+      }
+    }
+  ]
+}

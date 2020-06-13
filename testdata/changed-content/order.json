@@ -1,0 +1,41 @@
+{
+  "newStartPageToken": "page token go brrr",
+  "changes": [
+    {
+      "removed": false,
+      "fileId": "C",
+      "file": {
+        "id": "C",
+        "mimeType": "application/vnd.google-apps.folder",
+        "driveId": "testDrive",
+        "parents": [
+          "B"
+        ]
+      }
+    },
+    {
+      "removed": false,
+      "fileId": "B",
+      "file": {
+        "id": "B",
+        "mimeType": "application/vnd.google-apps.folder",
+        "driveId": "testDrive",
+        "parents": [
+          "A"
+        ]
+      }
+    },
+    {
+      "removed": false,
+      "fileId": "A",
+      "file": {
+        "id": "A",
+        "mimeType": "application/vnd.google-apps.folder",
+        "driveId": "testDrive",
+        "parents": [
+          "testDrive"
+        ]
+      }
+    }
+  ]
+}

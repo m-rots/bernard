@@ -1,0 +1,31 @@
+{
+  "files": [
+    {
+      "id": "Z",
+      "parents": [
+        "C"
+      ]
+    },
+    {
+      "id": "B",
+      "mimeType": "application/vnd.google-apps.folder",
+      "parents": [
+        "A"
+      ]
+    },
+    {
+      "id": "C",
+      "mimeType": "application/vnd.google-apps.folder",
+      "parents": [
+        "B"
+      ]
+    },
+    {
+      "id": "A",
+      "mimeType": "application/vnd.google-apps.folder",
+      "parents": [
+        "testDrive"
+      ]
+    }
+  ]
+}

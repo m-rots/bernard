@@ -1,0 +1,44 @@
+{
+  "files": [
+    {
+      "id": "A",
+      "name": "FOLDER A",
+      "mimeType": "application/vnd.google-apps.folder",
+      "trashed": false,
+      "parents": [
+        "testDrive"
+      ]
+    },
+    {
+      "id": "Z",
+      "name": "FILE Z",
+      "trashed": false,
+      "mimeType": "image/jpeg",
+      "md5Checksum": "ZZZ",
+      "size": "10",
+      "parents": [
+        "A"
+      ]
+    },
+    {
+      "id": "B",
+      "name": "FOLDER B",
+      "mimeType": "application/vnd.google-apps.folder",
+      "trashed": true,
+      "parents": [
+        "A"
+      ]
+    },
+    {
+      "id": "Y",
+      "name": "FILE Y",
+      "trashed": true,
+      "mimeType": "image/png",
+      "md5Checksum": "YYY",
+      "size": "100",
+      "parents": [
+        "B"
+      ]
+    }
+  ]
+}
