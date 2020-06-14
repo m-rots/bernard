@@ -77,7 +77,7 @@ It should respond with the access token as a string, its UNIX expiry time as an 
 
 ```go
 type Authenticator interface {
-	AccessToken() (string, int64, error)
+  AccessToken() (string, int64, error)
 }
 ```
 

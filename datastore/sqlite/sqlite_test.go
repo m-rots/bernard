@@ -233,3 +233,211 @@ func TestFullSync(t *testing.T) {
 		})
 	}
 }
+
+func TestPartialSync(t *testing.T) {
+	type State struct {
+		files   []ds.File
+		folders []ds.Folder
+		drive   ds.Drive
+	}
+
+	type Changed struct {
+		drive   ds.Drive
+		files   []ds.File
+		folders []ds.Folder
+		removed []string
+	}
+
+	type Test struct {
+		name     string
+		given    State
+		changes  Changed
+		expected State
+		err      error
+	}
+
+	var testCases = []Test{
+		{
+			name: "All Fields are updated",
+			err:  nil,
+			given: State{
+				drive: ds.Drive{
+					ID:        "Drive 123",
+					PageToken: "12345",
+					Name:      "Shared Drive",
+				},
+				folders: []ds.Folder{
+					{ID: "A", Name: "Folder A", Parent: "Drive 123", Trashed: true},
+					{ID: "B", Name: "Folder B", Parent: "Drive 123", Trashed: false},
+				},
+				files: []ds.File{
+					{ID: "Z", MD5: "ZZZZ", Name: "File Z", Parent: "A", Size: 100, Trashed: false},
+				},
+			},
+			changes: Changed{
+				drive: ds.Drive{
+					ID:        "Drive 123",
+					PageToken: "23456",
+				},
+				folders: []ds.Folder{
+					{ID: "A", Name: "Updated Folder A", Parent: "Drive 123", Trashed: false},
+					{ID: "B", Name: "Updated Folder B", Parent: "A", Trashed: true},
+				},
+				files: []ds.File{
+					{ID: "Z", MD5: "New MD5", Name: "Updated Z", Parent: "Drive 123", Size: 200, Trashed: true},
+				},
+			},
+			expected: State{
+				drive: ds.Drive{
+					ID:        "Drive 123",
+					PageToken: "23456",
+				},
+				folders: []ds.Folder{
+					{ID: "Drive 123", Name: "Shared Drive", Trashed: false},
+					{ID: "A", Name: "Updated Folder A", Parent: "Drive 123", Trashed: false},
+					{ID: "B", Name: "Updated Folder B", Parent: "A", Trashed: true},
+				},
+				files: []ds.File{
+					{ID: "Z", MD5: "New MD5", Name: "Updated Z", Parent: "Drive 123", Size: 200, Trashed: true},
+				},
+			},
+		},
+		{
+			name: "Recursive deletes",
+			err:  nil,
+			given: State{
+				drive: ds.Drive{
+					ID:        "tha drive",
+					PageToken: "323",
+					Name:      "Not a Shared Drive",
+				},
+				folders: []ds.Folder{
+					{ID: "A", Parent: "tha drive"},
+					{ID: "B", Parent: "A"},
+					{ID: "C", Parent: "B"},
+				},
+				files: []ds.File{
+					{ID: "Z", Parent: "A"},
+					{ID: "Y", Parent: "B"},
+					{ID: "X", Parent: "C"},
+				},
+			},
+			changes: Changed{
+				drive: ds.Drive{
+					ID:        "tha drive",
+					PageToken: "424",
+				},
+				removed: []string{"A"},
+			},
+			expected: State{
+				drive: ds.Drive{
+					ID:        "tha drive",
+					PageToken: "424",
+				},
+				folders: []ds.Folder{
+					{ID: "tha drive", Name: "Not a Shared Drive", Trashed: false},
+				},
+			},
+		},
+		{
+			name: "Shared Drive name change",
+			err:  nil,
+			given: State{
+				drive: ds.Drive{
+					ID:        "Shared Drive",
+					PageToken: "0",
+					Name:      "Old name",
+				},
+			},
+			changes: Changed{
+				drive: ds.Drive{
+					ID:        "Shared Drive",
+					PageToken: "123",
+					Name:      "New name",
+				},
+			},
+			expected: State{
+				drive: ds.Drive{
+					ID:        "Shared Drive",
+					PageToken: "123",
+				},
+				folders: []ds.Folder{
+					{ID: "Shared Drive", Name: "New name"},
+				},
+			},
+		},
+		{
+			name: "Data anomaly",
+			err:  ds.ErrDataAnomaly,
+			given: State{
+				drive: ds.Drive{
+					ID:        "root",
+					PageToken: "0",
+					Name:      "Data anomaly test",
+				},
+			},
+			changes: Changed{
+				drive: ds.Drive{
+					ID:        "root",
+					PageToken: "new pageToken",
+					Name:      "New name which should not be updated",
+				},
+				files: []ds.File{
+					{ID: "Z", Parent: "Non existent"},
+				},
+			},
+			expected: State{
+				drive: ds.Drive{
+					ID:        "root",
+					PageToken: "0",
+				},
+				folders: []ds.Folder{
+					{ID: "root", Name: "Data anomaly test"},
+				},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := setupTest(t)
+
+			err := store.FullSync(tc.given.drive, tc.given.folders, tc.given.files)
+			if err != nil {
+				t.Errorf("Error in full sync: %s", err.Error())
+				return
+			}
+
+			err = store.PartialSync(tc.changes.drive, tc.changes.folders, tc.changes.files, tc.changes.removed)
+			if !errors.Is(err, tc.err) {
+				t.Errorf("Unexpected error: %s", err.Error())
+				return
+			}
+
+			pageToken, err := store.PageToken(tc.expected.drive.ID)
+			if err != nil {
+				t.Errorf("Could not fetch pageToken: %s", err.Error())
+				return
+			}
+
+			if pageToken != tc.expected.drive.PageToken {
+				t.Errorf("pageTokens do not match")
+				return
+			}
+
+			files := getFiles(t, store)
+			if !reflect.DeepEqual(files, tc.expected.files) {
+				t.Log(files)
+				t.Log(tc.expected.files)
+				t.Errorf("Files to not match")
+			}
+
+			folders := getFolders(t, store)
+			if !reflect.DeepEqual(folders, tc.expected.folders) {
+				t.Log(folders)
+				t.Log(tc.expected.folders)
+				t.Errorf("Folders to not match")
+			}
+		})
+	}
+}
