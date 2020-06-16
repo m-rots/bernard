@@ -2,14 +2,15 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"reflect"
-	"time"
 
 	lowe "github.com/m-rots/bernard"
 	"github.com/m-rots/bernard/cmd/bernard/devstore"
 	ds "github.com/m-rots/bernard/datastore"
+	"github.com/m-rots/bernard/datastore/sqlite"
 	"github.com/m-rots/stubbs"
 )
 
@@ -18,11 +19,36 @@ type googleServiceAccount struct {
 	PrivateKey string `json:"private_key"`
 }
 
+func getStubbs(path string, scopes []string) *stubbs.Stubbs {
+	file, err := os.Open(path)
+	if err != nil {
+		fmt.Println("Could not open service account")
+		os.Exit(1)
+	}
+
+	decoder := json.NewDecoder(file)
+	sa := new(googleServiceAccount)
+
+	if decoder.Decode(sa) != nil {
+		fmt.Println("Error decoding service account")
+		os.Exit(1)
+	}
+
+	priv, err := stubbs.ParseKey(sa.PrivateKey)
+	if err != nil {
+		fmt.Println("Invalid private key")
+		os.Exit(1)
+	}
+
+	return stubbs.New(sa.Email, &priv, scopes, 3600)
+}
+
 const (
-	colourReset  string = "\033[0m"
-	colourRed    string = "\033[1;31m"
-	colourGreen  string = "\033[1;32m"
-	colourYellow string = "\033[1;33m"
+	colourReset   string = "\u001b[0m"
+	colourRed     string = "\u001b[31;1m"
+	colourGreen   string = "\u001b[32;1m"
+	colourYellow  string = "\u001b[33;1m"
+	colourMagenta string = "\u001b[35;1m"
 )
 
 func main() {
@@ -64,252 +90,142 @@ func main() {
 	bernard := lowe.New(driveID, auth, store)
 
 	if fullSync {
-		fmt.Println("Starting full sync, this might take a while...")
+		fmt.Printf("%slog%s - Starting full sync for the first time\n", colourMagenta, colourReset)
+		fmt.Println("A full sync takes about 1-2 seconds for every 1000 files. This could take a while...")
 		err = bernard.FullSync()
 		if err != nil {
-			panic(err)
+			if errors.Is(err, ds.ErrDataAnomaly) {
+				fmt.Printf("\n%swarning%s - A data anomaly occured.\n", colourYellow, colourReset)
+				fmt.Println("When critical changes were made to a Drive, this can happen. Please re-run the full-sync.")
+				os.Exit(1)
+			}
+
+			panic(err) // what the hell happened here!
 		}
 
-		fmt.Println("Done")
+		fmt.Printf("\n%slog%s - Successful full sync\n", colourMagenta, colourReset)
 
 		return
 	}
 
-	fmt.Println("Creating screenshot of the old state")
+	fmt.Printf("%slog%s - Creating screenshot of the old state\n", colourMagenta, colourReset)
 	oldState, err := store.CreateSnapshot()
 	if err != nil {
-		panic(err)
+		panic(err) // no error should occur here
 	}
 
-	fmt.Println("Syncing changes from Google Drive")
-	t0 := time.Now()
+	fmt.Printf("%slog%s - Syncing changes from Google Drive\n", colourMagenta, colourReset)
 
-	err = bernard.PartialSync()
+	hook, diff := store.NewDifferencesHook()
+	err = bernard.PartialSync(hook)
 	if err != nil {
-		panic(err)
+		if errors.Is(err, ds.ErrDataAnomaly) {
+			fmt.Printf("\n%swarning%s - A data anomaly occured. Please try again in 30 seconds.\n", colourYellow, colourReset)
+			fmt.Println("If this warning is still visible after multiple retries, please open an issue.")
+			os.Exit(1)
+		}
+
+		panic(err) // no error should occur here
 	}
 
-	fmt.Printf("\nTime taken to sync: %v\n", time.Since(t0).String())
-
-	fmt.Println("Creating snapshot of the new state")
+	fmt.Printf("%slog%s - Creating snapshot of the new state\n\n", colourMagenta, colourReset)
 
 	newState, err := store.CreateSnapshot()
 	if err != nil {
-		panic(err)
+		panic(err) // no error should occur here
 	}
 
-	fmt.Println("\nOld -> New")
+	if len(newState.Files) < 10000 {
+		fmt.Printf("%slog%s - Comparing local datastore against full sync as there are less than 10.000 files\n", colourMagenta, colourReset)
+
+		fmt.Printf("%slog%s - Creating in-memory datastore\n", colourMagenta, colourReset)
+		memStore, err := devstore.New("file:screenshot?mode=memory")
+		if err != nil {
+			panic(err) // no error should occur here
+		}
+
+		fmt.Printf("%slog%s - Running full sync to act as reference state\n", colourMagenta, colourReset)
+		reference := lowe.New(driveID, auth, memStore)
+		err = reference.FullSync()
+		if err != nil {
+			if errors.Is(err, ds.ErrDataAnomaly) {
+				fmt.Printf("\n%swarning%s - Changes were propagated but a data anomaly occured during the full sync.\n", colourYellow, colourReset)
+				fmt.Println("It is normal behaviour for the changes to not appear when re-trying the sync.")
+				fmt.Println("The changes were made to the database successfully and no data anomaly exists locally.")
+				os.Exit(1)
+			}
+
+			panic(err) // no error should occur here
+		}
+
+		fmt.Printf("%slog%s - Creating reference snapshot\n", colourMagenta, colourReset)
+		referenceState, err := memStore.CreateSnapshot()
+		if err != nil {
+			panic(err) // no error should occur here
+		}
+
+		if reflect.DeepEqual(newState, referenceState) {
+			fmt.Printf("\n%slog%s - Local and remote states are equal\n", colourMagenta, colourReset)
+		} else {
+			fmt.Printf("\n%swarning%s - Local and remote states are not equal, please wait for propagation\n", colourYellow, colourReset)
+			fmt.Printf("Is this message still appearing after a retry with more than 5 minutes in-between? Please create an issue!\n\n")
+		}
+	}
+
 	if reflect.DeepEqual(oldState, newState) {
-		fmt.Println("EQUAL")
+		fmt.Printf("%slog%s - Old and new states are equal\n", colourMagenta, colourReset)
 	} else {
-		fmt.Println("NOT EQUAL")
+		fmt.Printf("%slog%s - Old and new states are not equal, differences should be visible\n", colourMagenta, colourReset)
 	}
 
-	compareScreenshots(oldState, newState)
-
-	// if len(newState.Files) < 5000 {
-	// 	fmt.Println("\nCreating full snapshot of the current Drive state")
-
-	// 	fmt.Println("Creating in-memory datastore")
-	// 	memStore, err := devstore.New("file:screenshot?mode=memory")
-	// 	if err != nil {
-	// 		panic(err)
-	// 	}
-
-	// 	fmt.Println("Fetching reference state")
-	// 	reference := lowe.New(driveID, auth, memStore)
-	// 	err = reference.FullSync()
-	// 	if err != nil {
-	// 		panic(err)
-	// 	}
-
-	// 	fmt.Println("Creating reference snapshot")
-	// 	referenceState, err := memStore.CreateSnapshot()
-	// 	if err != nil {
-	// 		panic(err)
-	// 	}
-
-	// 	fmt.Println("\nBernard -> Reference")
-	// 	compareScreenshots(newState, referenceState)
-
-	// 	if reflect.DeepEqual(newState, referenceState) {
-	// 		fmt.Println("EQUAL")
-	// 	} else {
-	// 		fmt.Println("NOT EQUAL")
-	// 	}
-	// }
+	printDifference(diff)
 }
 
-func getStubbs(path string, scopes []string) *stubbs.Stubbs {
-	file, err := os.Open(path)
-	if err != nil {
-		fmt.Println("Could not open service account")
-		os.Exit(1)
-	}
-
-	decoder := json.NewDecoder(file)
-	sa := new(googleServiceAccount)
-
-	if decoder.Decode(sa) != nil {
-		fmt.Println("Error decoding service account")
-		os.Exit(1)
-	}
-
-	priv, err := stubbs.ParseKey(sa.PrivateKey)
-	if err != nil {
-		fmt.Println("Invalid private key")
-		os.Exit(1)
-	}
-
-	return stubbs.New(sa.Email, &priv, scopes, 3600)
-}
-
-func createMaps(ss *devstore.Snapshot) (map[string]ds.File, map[string]ds.Folder) {
-	filesByID := make(map[string]ds.File)
-	foldersByID := make(map[string]ds.Folder)
-
-	for _, f := range ss.Files {
-		filesByID[f.ID] = f
-	}
-
-	for _, f := range ss.Folders {
-		foldersByID[f.ID] = f
-	}
-
-	return filesByID, foldersByID
-}
-
-func changedPretty(name string, prev interface{}, next interface{}) string {
-	if prev != next {
-		return fmt.Sprintf("%v: %v -> %v\n", name, prev, next)
-	}
-
-	return ""
-}
-
-func compareScreenshots(oldSS *devstore.Snapshot, newSS *devstore.Snapshot) {
-	oldFiles, oldFolders := createMaps(oldSS)
-	newFiles, newFolders := createMaps(newSS)
-
-	var removedFiles []ds.File
-	var changedFiles []ds.File
-	var addedFiles []ds.File
-
-	// check for changed and removed files
-	for _, prev := range oldFiles {
-		next, ok := newFiles[prev.ID]
-		if !ok {
-			removedFiles = append(removedFiles, prev)
-			continue
-		}
-
-		if prev.MD5 != next.MD5 ||
-			prev.Name != next.Name ||
-			prev.Parent != next.Parent ||
-			prev.Size != next.Size ||
-			prev.Trashed != next.Trashed {
-			changedFiles = append(changedFiles, prev)
-		}
-	}
-
-	// check for new files
-	for _, next := range newFiles {
-		_, ok := oldFiles[next.ID]
-		if !ok {
-			addedFiles = append(addedFiles, next)
-		}
-	}
-
-	var removedFolders []ds.Folder
-	var changedFolders []ds.Folder
-	var addedFolders []ds.Folder
-
-	for _, prev := range oldFolders {
-		next, ok := newFolders[prev.ID]
-		if !ok {
-			removedFolders = append(removedFolders, prev)
-			continue
-		}
-
-		if prev.Name != next.Name ||
-			prev.Parent != next.Parent ||
-			prev.Trashed != next.Trashed {
-			changedFolders = append(changedFolders, prev)
-		}
-	}
-
-	// check for new folders
-	for _, next := range newFolders {
-		_, ok := oldFolders[next.ID]
-		if !ok {
-			addedFolders = append(addedFolders, next)
-		}
-	}
-
+func printDifference(diff *sqlite.Difference) {
 	// print added folders
-	if len(addedFolders) > 0 {
+	if len(diff.AddedFolders) > 0 {
 		fmt.Println("\nAdded folders:")
-		for _, f := range addedFolders {
+		for _, f := range diff.AddedFolders {
 			fmt.Printf("%screated%s - %s - %s\n", colourGreen, colourReset, f.ID, f.Name)
 		}
 	}
 
 	// print added files
-	if len(addedFiles) > 0 {
+	if len(diff.AddedFiles) > 0 {
 		fmt.Println("\nAdded files:")
-		for _, f := range addedFiles {
+		for _, f := range diff.AddedFiles {
 			fmt.Printf("%screated%s - %s - %s\n", colourGreen, colourReset, f.ID, f.Name)
 		}
 	}
 
 	// print changed folders
-	if len(changedFolders) > 0 {
+	if len(diff.ChangedFolders) > 0 {
 		fmt.Println("\nChanged folders:")
-		for _, prev := range changedFolders {
-			var output string
-			output += fmt.Sprintf("%schanged%s - %s - %s\n", colourYellow, colourReset, prev.ID, prev.Name)
-
-			next, _ := newFolders[prev.ID]
-
-			output += changedPretty("Name", prev.Name, next.Name)
-			output += changedPretty("Parent", prev.Parent, next.Parent)
-			output += changedPretty("Trashed", prev.Trashed, next.Trashed)
-
-			fmt.Print(output)
+		for _, f := range diff.ChangedFolders {
+			fmt.Printf("%schanged%s - %s - %s\n", colourYellow, colourReset, f.ID, f.Name)
 		}
 	}
 
 	// print changed files
-	if len(changedFiles) > 0 {
+	if len(diff.ChangedFiles) > 0 {
 		fmt.Println("\nChanged files:")
-		for _, prev := range changedFiles {
-			var output string
-			output += fmt.Sprintf("%schanged%s - %s - %s\n", colourYellow, colourReset, prev.ID, prev.Name)
-
-			next, _ := newFiles[prev.ID]
-
-			output += changedPretty("Name", prev.Name, next.Name)
-			output += changedPretty("Parent", prev.Parent, next.Parent)
-			output += changedPretty("Size", prev.Size, next.Size)
-			output += changedPretty("Trashed", prev.Trashed, next.Trashed)
-			output += changedPretty("MD5", prev.MD5, next.MD5)
-
-			fmt.Print(output)
+		for _, f := range diff.ChangedFiles {
+			fmt.Printf("%schanged%s - %s - %s\n", colourYellow, colourReset, f.ID, f.Name)
 		}
 	}
 
 	// print removed folders
-	if len(removedFolders) > 0 {
+	if len(diff.RemovedFolders) > 0 {
 		fmt.Println("\nRemoved folders:")
-		for _, f := range removedFolders {
+		for _, f := range diff.RemovedFolders {
 			fmt.Printf("%sremoved%s - %s - %s\n", colourRed, colourReset, f.ID, f.Name)
 		}
 	}
 
 	// print removed files
-	if len(removedFiles) > 0 {
+	if len(diff.RemovedFiles) > 0 {
 		fmt.Println("\nRemoved files:")
-		for _, f := range removedFiles {
+		for _, f := range diff.RemovedFiles {
 			fmt.Printf("%sremoved%s - %s - %s\n", colourRed, colourReset, f.ID, f.Name)
 		}
 	}

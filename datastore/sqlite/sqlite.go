@@ -6,6 +6,7 @@ package sqlite
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 
 	ds "github.com/m-rots/bernard/datastore"
 
@@ -40,6 +41,24 @@ var ErrTransaction = fmt.Errorf("transaction: %w", ds.ErrDatabase)
 // ErrInvalidStatement occurs when the SQL statement is not compatible
 // with the underlying driver or when the database is not initialised with tables yet.
 var ErrInvalidStatement = fmt.Errorf("invalid statement: %w", ds.ErrDatabase)
+
+// addParameters adds the bind vars to the query string for the provided number of items.
+//
+// items must be >0
+func addParameters(query string, items int) string {
+	i := strings.IndexByte(query, '?') + 1
+
+	var str strings.Builder
+	str.Grow(len(query) + len(", ?")*(items-1))
+	str.WriteString(query[:i])
+
+	for i := 0; i < items-1; i++ {
+		str.WriteString(", ?")
+	}
+
+	str.WriteString(query[i:])
+	return str.String()
+}
 
 // FullSync synchronises the provided Drive state to the datastore.
 func (store *Datastore) FullSync(drive ds.Drive, folders []ds.Folder, files []ds.File) (err error) {
@@ -144,18 +163,6 @@ func (store *Datastore) PartialSync(drive ds.Drive, changedFolders []ds.Folder, 
 		return fmt.Errorf("%v: %w", sqlUpsertDrive, ErrInvalidStatement)
 	}
 
-	// prepare statement to delete files
-	deleteFile, err := tx.Prepare(sqlDeleteFile)
-	if err != nil {
-		return fmt.Errorf("%v: %w", sqlDeleteFile, ErrInvalidStatement)
-	}
-
-	// prepare statement to delete folders
-	deleteFolder, err := tx.Prepare(sqlDeleteFolder)
-	if err != nil {
-		return fmt.Errorf("%v: %w", sqlDeleteFolder, ErrInvalidStatement)
-	}
-
 	// Update the pageToken for future sync jobs.
 	_, err = upsertDrive.Exec(drive.ID, drive.PageToken)
 	if err != nil {
@@ -177,7 +184,6 @@ func (store *Datastore) PartialSync(drive ds.Drive, changedFolders []ds.Folder, 
 		_, err := upsertFolder.Exec(f.ID, f.Name, f.Parent, f.Trashed)
 
 		if err != nil {
-			fmt.Println(err)
 			tx.Rollback()
 			return fmt.Errorf("%v: %w", f.ID, ds.ErrDataAnomaly)
 		}
@@ -193,10 +199,28 @@ func (store *Datastore) PartialSync(drive ds.Drive, changedFolders []ds.Folder, 
 		}
 	}
 
-	// remove files and folders if moved or permanently deleted
-	for _, id := range removedIDs {
-		deleteFile.Exec(id)
-		deleteFolder.Exec(id)
+	if len(removedIDs) > 0 {
+		deleteFiles := addParameters(sqlDeleteFiles, len(removedIDs))
+
+		// convert []string to []interface{} as Exec requires a []interface{} input
+		args := make([]interface{}, len(removedIDs))
+		for i, id := range removedIDs {
+			args[i] = id
+		}
+
+		_, err = tx.Exec(deleteFiles, args...)
+		if err != nil {
+			tx.Rollback()
+			return fmt.Errorf("deleting files: %w", ds.ErrDataAnomaly)
+		}
+
+		deleteFolders := addParameters(sqlDeleteFolders, len(removedIDs))
+
+		_, err = tx.Exec(deleteFolders, args...)
+		if err != nil {
+			tx.Rollback()
+			return fmt.Errorf("deleting folders: %w", ds.ErrDataAnomaly)
+		}
 	}
 
 	err = tx.Commit()
@@ -229,10 +253,7 @@ CREATE TABLE IF NOT EXISTS file (
   "size" integer NOT NULL,
   "md5" text NOT NULL,
   "trashed" boolean NOT NULL,
-  FOREIGN KEY(parent)
-    REFERENCES folder(id)
-      ON DELETE CASCADE
-      ON UPDATE CASCADE
+  FOREIGN KEY(parent) REFERENCES folder(id) DEFERRABLE INITIALLY IMMEDIATE
 );
 
 CREATE TABLE IF NOT EXISTS folder (
@@ -240,10 +261,7 @@ CREATE TABLE IF NOT EXISTS folder (
   "name" text NOT NULL,
   "trashed" boolean NOT NULL,
   "parent" text,
-  FOREIGN KEY(parent)
-    REFERENCES folder(id)
-      ON DELETE CASCADE
-      ON UPDATE CASCADE
+  FOREIGN KEY(parent) REFERENCES folder(id) DEFERRABLE INITIALLY IMMEDIATE
 );
 
 CREATE TABLE IF NOT EXISTS drive (
@@ -276,12 +294,12 @@ INSERT INTO file (id, name, md5, parent, size, trashed) VALUES ($1, $2, $3, $4, 
 		trashed=$6
 `
 
-const sqlDeleteFile = `
-DELETE FROM file WHERE id=?
+const sqlDeleteFiles = `
+DELETE FROM file WHERE id IN (?)
 `
 
-const sqlDeleteFolder = `
-DELETE FROM folder WHERE id=?
+const sqlDeleteFolders = `
+DELETE FROM folder WHERE id IN (?)
 `
 
 const sqlGetPageToken = `

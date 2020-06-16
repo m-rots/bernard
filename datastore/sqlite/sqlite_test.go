@@ -75,6 +75,41 @@ func getFolders(t *testing.T, store *Datastore) (folders []ds.Folder) {
 	return folders
 }
 
+func TestAddParameters(t *testing.T) {
+	type Test struct {
+		query  string
+		items  int
+		result string
+	}
+
+	var testCases = []Test{
+		{
+			query:  "DELETE FROM file WHERE id IN (?)",
+			items:  5,
+			result: "DELETE FROM file WHERE id IN (?, ?, ?, ?, ?)",
+		},
+		{
+			query:  "?",
+			items:  10,
+			result: "?, ?, ?, ?, ?, ?, ?, ?, ?, ?",
+		},
+		{
+			query:  "?",
+			items:  1,
+			result: "?",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.result, func(t *testing.T) {
+			withParams := addParameters(tc.query, tc.items)
+			if withParams != tc.result {
+				t.Errorf("%s does not match expected value: %s", withParams, tc.result)
+			}
+		})
+	}
+}
+
 func TestPageToken(t *testing.T) {
 	type test struct {
 		driveID   string
@@ -303,39 +338,79 @@ func TestPartialSync(t *testing.T) {
 			},
 		},
 		{
-			name: "Recursive deletes",
+			name: "No data anomaly when all children get deleted",
 			err:  nil,
 			given: State{
 				drive: ds.Drive{
 					ID:        "tha drive",
-					PageToken: "323",
+					PageToken: "old",
 					Name:      "Not a Shared Drive",
 				},
 				folders: []ds.Folder{
 					{ID: "A", Parent: "tha drive"},
 					{ID: "B", Parent: "A"},
-					{ID: "C", Parent: "B"},
 				},
 				files: []ds.File{
 					{ID: "Z", Parent: "A"},
 					{ID: "Y", Parent: "B"},
-					{ID: "X", Parent: "C"},
 				},
 			},
 			changes: Changed{
 				drive: ds.Drive{
 					ID:        "tha drive",
-					PageToken: "424",
+					PageToken: "new",
+				},
+				removed: []string{"A", "B", "Z", "Y"},
+			},
+			expected: State{
+				drive: ds.Drive{
+					ID:        "tha drive",
+					PageToken: "new",
+				},
+				folders: []ds.Folder{
+					{ID: "tha drive", Name: "Not a Shared Drive", Trashed: false},
+				},
+			},
+		},
+		{
+			// files and folders should stay because of the transaction rollback
+			name: "Data anomaly when children do not get deleted",
+			err:  ds.ErrDataAnomaly,
+			given: State{
+				drive: ds.Drive{
+					ID:        "tha drive",
+					PageToken: "old",
+					Name:      "Not a Shared Drive",
+				},
+				folders: []ds.Folder{
+					{ID: "A", Parent: "tha drive"},
+					{ID: "B", Parent: "A"},
+				},
+				files: []ds.File{
+					{ID: "Z", Parent: "A"},
+					{ID: "Y", Parent: "B"},
+				},
+			},
+			changes: Changed{
+				drive: ds.Drive{
+					ID:        "tha drive",
+					PageToken: "new",
 				},
 				removed: []string{"A"},
 			},
 			expected: State{
 				drive: ds.Drive{
 					ID:        "tha drive",
-					PageToken: "424",
+					PageToken: "old",
 				},
 				folders: []ds.Folder{
 					{ID: "tha drive", Name: "Not a Shared Drive", Trashed: false},
+					{ID: "A", Parent: "tha drive"},
+					{ID: "B", Parent: "A"},
+				},
+				files: []ds.File{
+					{ID: "Z", Parent: "A"},
+					{ID: "Y", Parent: "B"},
 				},
 			},
 		},

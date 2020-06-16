@@ -16,9 +16,17 @@ Furthermore, not all components have associated tests.
 
 This early-access preview comes with a small CLI to visually reflect the changes Bernard picks up. Once Bernard is proven to be stable and correct, this CLI will be removed.
 
+### Building the CLI
+
+1. Install [Golang](https://golang.org/dl/).
+2. Set the environment variable `CGO_ENABLED=1` and make sure you have a GCC compiler present.
+3. Clone this repository and `cd` into it.
+4. Run: `go build -o bernard cmd/bernard/main.go`
+
+You should now see a binary called `bernard` in the current working directory.
+
 ### Using the CLI
 
-The CLI uses [Stubbs](https://github.com/m-rots/stubbs) to manage the authentication process.
 Make sure you create a Service Account which has read access to the Shared Drive in question.
 Additionally, please check whether you have the Drive API enabled in Google Cloud.
 Save a JSON key of this service account and store it somewhere you can easily access the file.
@@ -49,6 +57,12 @@ In this example, a full synchronisation is activated for the Shared Drive `1234x
 
 ## Using Bernard in your Go project
 
+Bernard is available as a Go module. To add Bernard to your Go project run the following command:
+
+```bash
+go get github.com/m-rots/bernard
+```
+
 ### Full & Partial Synchronisation
 
 Bernard allows two ways of synchronising the datastore.
@@ -61,11 +75,34 @@ Once you have fully synchronised the Shared Drive, you can use the `PartialSync(
 
 ### Hooks
 
-Coming soon!
+Hooks allow you to run code in-between the fetch of changes and the processing of these changes to the datastore.
+The reference SQLite datastores comes with a `NewDifferencesHook()` function to check which of the Google-reported files have actually changed.
+Furthermore, it also retrieves the last-known values of removed items and reports which items have been added (do not exist yet).
+
+To create a DifferencesHook, you can utilise the following code:
+
+```go
+hook, diff := store.NewDifferencesHook()
+err = bernard.PartialSync(hook)
+
+// access diff
+```
+
+`diff` is a pointer to a `Difference` struct and is filled with data by the PartialSync function.
+The `Difference` struct contains:
+
+- `AddedFiles`, a slice of files not currently present in the datastore.
+- `AddedFolders`, a slice of folders not currently present in the datastore.
+- `ChangedFiles`, a slice of files currently present in the datastore with updated values.
+- `ChangedFolders`, a slice of folders currently present in the datastore with updated values.
+- `RemovedFiles`, a slice of removed files with their last-known state stored by the datastore.
+- `RemovedFolders`, a slice of removed folders with their last-known state stored by the datastore.
 
 ### Datastore
 
 The datastore is a core component of Bernard's operations. Bernard provides a reference implementation of a Datastore in the form of a SQLite database. This reference datastore can be expanded to allow other operations on the underlying `database/sql` interface.
+
+Please note that the reference SQLite datastore uses the CGO enabled package [go-sqlite3](https://github.com/mattn/go-sqlite3). This dependency affects cross-compilation.
 
 If SQLite is not your database of choice, feel free to open a pull request with support for another database such as MongoDB, Fauna or CockroachDB. I highly advise you to have a look at `datastore/datastore.go` and `datastore/sqlite/sqlite.go` files to get a feel for the operations the Datastore interface should perform.
 
