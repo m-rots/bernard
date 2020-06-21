@@ -94,7 +94,7 @@ func (store *Datastore) FullSync(drive ds.Drive, folders []ds.Folder, files []ds
 	}
 
 	// Insert the Shared Drive as the root folder.
-	_, err = upsertFolder.Exec(drive.ID, drive.Name, nil, false)
+	_, err = upsertFolder.Exec(drive.ID, drive.ID, drive.Name, nil, false)
 	if err != nil {
 		tx.Rollback()
 		return fmt.Errorf("%v: %w", drive.ID, ds.ErrDataAnomaly)
@@ -103,7 +103,7 @@ func (store *Datastore) FullSync(drive ds.Drive, folders []ds.Folder, files []ds
 	// Upsert all folders.
 	// Rollback when a data anomaly is detected (such as a FOREIGN KEY constraint).
 	for _, f := range folders {
-		_, err = upsertFolder.Exec(f.ID, f.Name, f.Parent, f.Trashed)
+		_, err = upsertFolder.Exec(f.ID, drive.ID, f.Name, f.Parent, f.Trashed)
 
 		if err != nil {
 			tx.Rollback()
@@ -114,7 +114,7 @@ func (store *Datastore) FullSync(drive ds.Drive, folders []ds.Folder, files []ds
 	// Upsert all files.
 	// Rollback when a data anomaly is detected (such as a FOREIGN KEY constraint).
 	for _, f := range files {
-		_, err = upsertFile.Exec(f.ID, f.Name, f.MD5, f.Parent, f.Size, f.Trashed)
+		_, err = upsertFile.Exec(f.ID, drive.ID, f.Name, f.MD5, f.Parent, f.Size, f.Trashed)
 
 		if err != nil {
 			tx.Rollback()
@@ -172,7 +172,7 @@ func (store *Datastore) PartialSync(drive ds.Drive, changedFolders []ds.Folder, 
 
 	// Drive name is empty if not changed, so when not empty we should update it.
 	if drive.Name != "" {
-		_, err = upsertFolder.Exec(drive.ID, drive.Name, nil, false)
+		_, err = upsertFolder.Exec(drive.ID, drive.ID, drive.Name, nil, false)
 		if err != nil {
 			tx.Rollback()
 			return fmt.Errorf("%v: %w", drive.ID, ds.ErrDataAnomaly)
@@ -181,7 +181,7 @@ func (store *Datastore) PartialSync(drive ds.Drive, changedFolders []ds.Folder, 
 
 	// upsert all changed folders and change childrens' trashed state
 	for _, f := range changedFolders {
-		_, err := upsertFolder.Exec(f.ID, f.Name, f.Parent, f.Trashed)
+		_, err := upsertFolder.Exec(f.ID, drive.ID, f.Name, f.Parent, f.Trashed)
 
 		if err != nil {
 			tx.Rollback()
@@ -191,7 +191,7 @@ func (store *Datastore) PartialSync(drive ds.Drive, changedFolders []ds.Folder, 
 
 	// upsert all changed files
 	for _, f := range changedFiles {
-		_, err = upsertFile.Exec(f.ID, f.Name, f.MD5, f.Parent, f.Size, f.Trashed)
+		_, err = upsertFile.Exec(f.ID, drive.ID, f.Name, f.MD5, f.Parent, f.Size, f.Trashed)
 
 		if err != nil {
 			tx.Rollback()
@@ -200,13 +200,17 @@ func (store *Datastore) PartialSync(drive ds.Drive, changedFolders []ds.Folder, 
 	}
 
 	if len(removedIDs) > 0 {
-		deleteFiles := addParameters(sqlDeleteFiles, len(removedIDs))
-
 		// convert []string to []interface{} as Exec requires a []interface{} input
-		args := make([]interface{}, len(removedIDs))
+		args := make([]interface{}, len(removedIDs)+1)
 		for i, id := range removedIDs {
 			args[i] = id
 		}
+
+		// append DriveID for the WHERE clause
+		args[len(removedIDs)] = drive.ID
+
+		// first try to delete all files to prevent data anomalies
+		deleteFiles := addParameters(sqlDeleteFiles, len(removedIDs))
 
 		_, err = tx.Exec(deleteFiles, args...)
 		if err != nil {
@@ -214,6 +218,7 @@ func (store *Datastore) PartialSync(drive ds.Drive, changedFolders []ds.Folder, 
 			return fmt.Errorf("deleting files: %w", ds.ErrDataAnomaly)
 		}
 
+		// then try to delete all folders, which should have no files as children now
 		deleteFolders := addParameters(sqlDeleteFolders, len(removedIDs))
 
 		_, err = tx.Exec(deleteFolders, args...)
@@ -247,59 +252,64 @@ const sqlSchema string = `
 PRAGMA foreign_keys=ON;
 
 CREATE TABLE IF NOT EXISTS file (
-  "id" text PRIMARY KEY,
-  "name" text NOT NULL,
-  "parent" text NOT NULL,
-  "size" integer NOT NULL,
-  "md5" text NOT NULL,
-  "trashed" boolean NOT NULL,
-  FOREIGN KEY(parent) REFERENCES folder(id) DEFERRABLE INITIALLY IMMEDIATE
+	"id" text NOT NULL,
+	"drive" text NOT NULL,
+	"name" text NOT NULL,
+	"parent" text NOT NULL,
+	"size" integer NOT NULL,
+	"md5" text NOT NULL,
+	"trashed" boolean NOT NULL,
+	PRIMARY KEY(id, drive),
+	FOREIGN KEY(parent, drive) REFERENCES folder(id, drive) DEFERRABLE INITIALLY IMMEDIATE
 );
 
 CREATE TABLE IF NOT EXISTS folder (
-  "id" text PRIMARY KEY,
+	"id" text NOT NULL,
+	"drive" text NOT NULL,
   "name" text NOT NULL,
   "trashed" boolean NOT NULL,
-  "parent" text,
-  FOREIGN KEY(parent) REFERENCES folder(id) DEFERRABLE INITIALLY IMMEDIATE
+	"parent" text,
+	PRIMARY KEY(id, drive),
+  FOREIGN KEY(parent, drive) REFERENCES folder(id, drive) DEFERRABLE INITIALLY IMMEDIATE
 );
 
 CREATE TABLE IF NOT EXISTS drive (
-  "id" text PRIMARY KEY,
-  "pageToken" text NOT NULL
+	"id" text NOT NULL,
+	"pageToken" text NOT NULL,
+	PRIMARY KEY(id)
 )
 `
 
 const sqlUpsertDrive = `
-INSERT INTO drive (id, pageToken) VALUES ($1, $2)
+INSERT INTO drive (id, pageToken) VALUES (?, ?)
 	ON CONFLICT(id) DO UPDATE SET
-		pageToken=$2
+		pageToken=excluded.pageToken
 `
 
 const sqlUpsertFolder = `
-INSERT INTO folder (id, name, parent, trashed) VALUES ($1, $2, NULLIF($3, ""), $4)
-	ON CONFLICT(id) DO UPDATE SET
-		name=$2,
-		parent=NULLIF($3, ""),
-		trashed=$4
+INSERT INTO folder (id, drive, name, parent, trashed) VALUES (?, ?, ?, NULLIF(?, ""), ?)
+	ON CONFLICT(id, drive) DO UPDATE SET
+		name=excluded.name,
+		parent=excluded.parent,
+		trashed=excluded.trashed
 `
 
 const sqlUpsertFile = `
-INSERT INTO file (id, name, md5, parent, size, trashed) VALUES ($1, $2, $3, $4, $5, $6)
-	ON CONFLICT(id) DO UPDATE SET
-    name=$2,
-    md5=$3,
-    parent=$4,
-    size=$5,
-		trashed=$6
+INSERT INTO file (id, drive, name, md5, parent, size, trashed) VALUES (?, ?, ?, ?, ?, ?, ?)
+	ON CONFLICT(id, drive) DO UPDATE SET
+    name=excluded.name,
+    md5=excluded.md5,
+    parent=excluded.parent,
+    size=excluded.size,
+		trashed=excluded.trashed
 `
 
 const sqlDeleteFiles = `
-DELETE FROM file WHERE id IN (?)
+DELETE FROM file WHERE id IN (?) AND drive=? 
 `
 
 const sqlDeleteFolders = `
-DELETE FROM folder WHERE id IN (?)
+DELETE FROM folder WHERE id IN (?) AND drive=?
 `
 
 const sqlGetPageToken = `

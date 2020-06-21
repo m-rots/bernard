@@ -144,6 +144,7 @@ func TestDifferenceHook(t *testing.T) {
 				},
 			},
 			changes: Changes{
+				drive:   drive,
 				removed: []string{"A", "B", "Z", "Y", "X"},
 			},
 			expected: &Difference{

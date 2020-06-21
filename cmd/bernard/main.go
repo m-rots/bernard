@@ -73,10 +73,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	if fullSync {
-		os.Remove("./bernard.db")
-	}
-
 	store, err := devstore.New("./bernard.db")
 	if err != nil {
 		panic(err)
@@ -109,7 +105,7 @@ func main() {
 	}
 
 	fmt.Printf("%slog%s - Creating screenshot of the old state\n", colourMagenta, colourReset)
-	oldState, err := store.CreateSnapshot()
+	oldState, err := store.CreateSnapshot(driveID)
 	if err != nil {
 		panic(err) // no error should occur here
 	}
@@ -130,7 +126,7 @@ func main() {
 
 	fmt.Printf("%slog%s - Creating snapshot of the new state\n\n", colourMagenta, colourReset)
 
-	newState, err := store.CreateSnapshot()
+	newState, err := store.CreateSnapshot(driveID)
 	if err != nil {
 		panic(err) // no error should occur here
 	}
@@ -159,7 +155,7 @@ func main() {
 		}
 
 		fmt.Printf("%slog%s - Creating reference snapshot\n", colourMagenta, colourReset)
-		referenceState, err := memStore.CreateSnapshot()
+		referenceState, err := memStore.CreateSnapshot(driveID)
 		if err != nil {
 			panic(err) // no error should occur here
 		}

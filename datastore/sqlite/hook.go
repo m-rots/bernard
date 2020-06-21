@@ -40,7 +40,7 @@ func (store *Datastore) NewDifferencesHook() (bernard.Hook, *Difference) {
 
 		for _, folder := range folders {
 			f := ds.Folder{ID: folder.ID}
-			row := getFolder.QueryRow(folder.ID)
+			row := getFolder.QueryRow(folder.ID, drive.ID)
 			err := row.Scan(&f.Name, &f.Parent, &f.Trashed)
 			if err != nil {
 				// If no row is returned, the folder does not yet exist in the old state.
@@ -70,7 +70,7 @@ func (store *Datastore) NewDifferencesHook() (bernard.Hook, *Difference) {
 
 		for _, file := range files {
 			f := ds.File{ID: file.ID}
-			row := getFile.QueryRow(file.ID)
+			row := getFile.QueryRow(file.ID, drive.ID)
 			err := row.Scan(&f.Name, &f.Parent, &f.Trashed, &f.Size, &f.MD5)
 			if err != nil {
 				// If no row is returned, the file does not yet exist in the old state.
@@ -93,7 +93,7 @@ func (store *Datastore) NewDifferencesHook() (bernard.Hook, *Difference) {
 		for _, id := range removed {
 			// check whether it could be a file first
 			file := ds.File{ID: id}
-			fileRow := getFile.QueryRow(id)
+			fileRow := getFile.QueryRow(id, drive.ID)
 			err := fileRow.Scan(&file.Name, &file.Parent, &file.Trashed, &file.Size, &file.MD5)
 
 			// no error -> thus a file
@@ -108,7 +108,7 @@ func (store *Datastore) NewDifferencesHook() (bernard.Hook, *Difference) {
 
 			// file did not return, try again for folder
 			folder := ds.Folder{ID: id}
-			folderRow := getFolder.QueryRow(id)
+			folderRow := getFolder.QueryRow(id, drive.ID)
 			err = folderRow.Scan(&folder.Name, &folder.Parent, &folder.Trashed)
 
 			// no error -> thus a folder
@@ -133,9 +133,9 @@ func (store *Datastore) NewDifferencesHook() (bernard.Hook, *Difference) {
 }
 
 const sqlGetFileByID = `
-SELECT name, parent, trashed, size, md5 FROM file WHERE id=?
+SELECT name, parent, trashed, size, md5 FROM file WHERE id=? AND drive=?
 `
 
 const sqlGetFolderByID = `
-SELECT name, parent, trashed FROM folder WHERE id=?
+SELECT name, parent, trashed FROM folder WHERE id=? AND drive=?
 `
