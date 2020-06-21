@@ -35,11 +35,11 @@ func New(path string) (*Devstore, error) {
 }
 
 // CreateSnapshot returns a *Snapshot of the current state of the datastore.
-func (store *Devstore) CreateSnapshot() (*Snapshot, error) {
+func (store *Devstore) CreateSnapshot(driveID string) (*Snapshot, error) {
 	var files []ds.File
 	var folders []ds.Folder
 
-	fileRows, err := store.DB.Query(sqlSelectFiles)
+	fileRows, err := store.DB.Query(sqlSelectFiles, driveID)
 	if err != nil {
 		return nil, err
 	}
@@ -59,7 +59,7 @@ func (store *Devstore) CreateSnapshot() (*Snapshot, error) {
 		return nil, err
 	}
 
-	folderRows, err := store.DB.Query(sqlSelectFolders)
+	folderRows, err := store.DB.Query(sqlSelectFolders, driveID)
 	if err != nil {
 		return nil, err
 	}
@@ -90,12 +90,13 @@ func (store *Devstore) CreateSnapshot() (*Snapshot, error) {
 const sqlSelectFolders = `
 SELECT id, name, trashed, parent
 FROM folder
-WHERE parent IS NOT NULL
+WHERE drive=? AND parent IS NOT NULL
 ORDER BY id ASC
 `
 
 const sqlSelectFiles = `
 SELECT id, name, parent, size, md5, trashed
 FROM file
+WHERE drive=?
 ORDER BY id ASC
 `

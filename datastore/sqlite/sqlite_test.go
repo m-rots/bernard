@@ -98,6 +98,11 @@ func TestAddParameters(t *testing.T) {
 			items:  1,
 			result: "?",
 		},
+		{
+			query:  "DELETE FROM file WHERE id IN (?) AND drive=?",
+			items:  5,
+			result: "DELETE FROM file WHERE id IN (?, ?, ?, ?, ?) AND drive=?",
+		},
 	}
 
 	for _, tc := range testCases {
