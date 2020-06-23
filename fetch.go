@@ -3,6 +3,7 @@ package bernard
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"time"
@@ -34,148 +35,145 @@ type driveChange struct {
 	Removed bool
 }
 
-type pageTokenResponse struct {
-	StartPageToken string
+type driveError struct {
+	Domain  string
+	Message string
+	Reason  string
 }
 
-type driveResponse struct {
-	Name string
+type errorResponse struct {
+	Error struct {
+		Errors  []driveError
+		Code    int
+		Message string
+	}
 }
 
-type allContentResponse struct {
-	Files         []driveItem
-	NextPageToken string
-}
-
-type changedContentResponse struct {
-	NextPageToken     string
-	NewStartPageToken string
-	Changes           []driveChange
-}
-
-var client = &http.Client{
-	Timeout: 30 * time.Second,
+type changedContent struct {
+	Drive          ds.Drive
+	ChangedFiles   []ds.File
+	ChangedFolders []ds.Folder
+	RemovedIDs     []string
 }
 
 type fetcher struct {
 	auth    Authenticator
 	baseURL string
+	client  *http.Client
 	driveID string
+	sleep   func(time.Duration)
 }
 
-func bearer(accessToken string) string {
-	return "Bearer " + accessToken
-}
+func (fetch *fetcher) withAuth(req *http.Request) (res *http.Response, err error) {
+	var retriedAttempts int
 
-func (fetch *fetcher) mapError(status int) error {
-	switch status {
-	case 401:
-		// Scope / Credential error
-		return ErrInvalidCredentials
-	case 404:
-		// Shared Drive not found
-		return fmt.Errorf("%v: %w", fetch.driveID, ErrNotFound)
-	case 500:
-		// should handle exponential timeout.
-		// for now, just keep retrying
-		return nil
-	default:
-		return fmt.Errorf("%v: %w", status, ErrNetwork)
+	// handle exponential backoff
+	handleBackoff := func() {
+		var waitDuration time.Duration
+
+		exponentialBackoff := math.Exp2(float64(retriedAttempts))
+		if exponentialBackoff <= 32 {
+			waitDuration = time.Duration(exponentialBackoff) * time.Second
+		} else {
+			waitDuration = time.Duration(32) * time.Second
+		}
+
+		fetch.sleep(waitDuration)
+		retriedAttempts++
+	}
+
+	// for loop to retry if necessary
+	for {
+		token, _, err := fetch.auth.AccessToken()
+		if err != nil {
+			return nil, err
+		}
+
+		req.Header.Add("Authorization", "Bearer "+token)
+		res, err = fetch.client.Do(req)
+		if err != nil {
+			return nil, ErrNetwork
+		}
+
+		if res.StatusCode == 200 {
+			return res, nil
+		}
+
+		response := new(errorResponse)
+		json.NewDecoder(res.Body).Decode(response)
+		res.Body.Close()
+
+		switch res.StatusCode {
+		case 429, 500, 502, 503, 504:
+			handleBackoff()
+			continue
+		case 401:
+			return nil, ErrInvalidCredentials
+		case 403:
+			driveErrors := response.Error.Errors
+			if len(driveErrors) == 0 {
+				return nil, fmt.Errorf("%v: %w", response.Error.Message, ErrNetwork)
+			}
+			switch response.Error.Errors[0].Reason {
+			case "userRateLimitExceeded", "rateLimitExceeded":
+				handleBackoff()
+				continue
+			default:
+				return nil, fmt.Errorf("%v: %w", response.Error.Message, ErrNetwork)
+			}
+		case 404:
+			return nil, fmt.Errorf("%v: %w", fetch.driveID, ErrNotFound)
+		default:
+			return nil, fmt.Errorf("%v: %w", response.Error.Message, ErrNetwork)
+		}
 	}
 }
 
 func (fetch *fetcher) pageToken() (string, error) {
-	var startPageToken string
+	req, _ := http.NewRequest("GET", fetch.baseURL+"/changes/startPageToken", nil)
 
-	for {
-		token, _, err := fetch.auth.AccessToken()
-		if err != nil {
-			return "", err
-		}
+	q := url.Values{}
+	q.Add("driveId", fetch.driveID)
+	q.Add("supportsAllDrives", "true")
+	req.URL.RawQuery = q.Encode()
 
-		req, _ := http.NewRequest("GET", fetch.baseURL+"/changes/startPageToken", nil)
-		req.Header.Add("Authorization", bearer(token))
-
-		q := url.Values{}
-		q.Add("driveId", fetch.driveID)
-		q.Add("supportsAllDrives", "true")
-		req.URL.RawQuery = q.Encode()
-
-		res, err := client.Do(req)
-		if err != nil {
-			// create a bernard network issue?
-			return "", fmt.Errorf("could not make request: %w", ErrNetwork)
-		}
-
-		if res.StatusCode != 200 {
-			res.Body.Close()
-
-			if err := fetch.mapError(res.StatusCode); err != nil {
-				return "", err
-			}
-
-			continue
-		}
-
-		response := new(pageTokenResponse)
-		json.NewDecoder(res.Body).Decode(response)
-
-		res.Body.Close()
-
-		startPageToken = response.StartPageToken
-		if startPageToken != "" {
-			break
-		}
+	res, err := fetch.withAuth(req)
+	if err != nil {
+		return "", err
 	}
 
-	return startPageToken, nil
+	type Response struct {
+		StartPageToken string
+	}
+
+	response := new(Response)
+	json.NewDecoder(res.Body).Decode(response)
+	res.Body.Close()
+
+	return response.StartPageToken, nil
 }
 
 func (fetch *fetcher) drive() (string, error) {
-	var name string
+	req, _ := http.NewRequest("GET", fetch.baseURL+"/drives/"+fetch.driveID, nil)
 
-	// for loop to handle 500s
-	for {
-		token, _, err := fetch.auth.AccessToken()
-		if err != nil {
-			return "", err
-		}
+	q := url.Values{}
+	q.Add("fields", "name")
+	req.URL.RawQuery = q.Encode()
 
-		req, _ := http.NewRequest("GET", fetch.baseURL+"/drives/"+fetch.driveID, nil)
-		req.Header.Add("Authorization", bearer(token))
-
-		q := url.Values{}
-		q.Add("fields", "name")
-		req.URL.RawQuery = q.Encode()
-
-		res, err := client.Do(req)
-		if err != nil {
-			// create a bernard network issue?
-			return "", fmt.Errorf("could not make request: %w", ErrNetwork)
-		}
-
-		if res.StatusCode != 200 {
-			res.Body.Close()
-
-			if err := fetch.mapError(res.StatusCode); err != nil {
-				return "", err
-			}
-
-			continue
-		}
-
-		response := new(driveResponse)
-		json.NewDecoder(res.Body).Decode(response)
-
-		res.Body.Close()
-
-		name = response.Name
-		if name != "" {
-			break
-		}
+	res, err := fetch.withAuth(req)
+	if err != nil {
+		return "", err
 	}
 
-	return name, nil
+	type Response struct {
+		Name string
+	}
+
+	response := new(Response)
+	json.NewDecoder(res.Body).Decode(response)
+	res.Body.Close()
+
+	return response.Name, nil
 }
 
 func (fetch *fetcher) allContent() ([]ds.Folder, []ds.File, error) {
@@ -184,13 +182,7 @@ func (fetch *fetcher) allContent() ([]ds.Folder, []ds.File, error) {
 	var pageToken string
 
 	for {
-		token, _, err := fetch.auth.AccessToken()
-		if err != nil {
-			return nil, nil, err
-		}
-
 		req, _ := http.NewRequest("GET", fetch.baseURL+"/files", nil)
-		req.Header.Add("Authorization", bearer(token))
 
 		q := url.Values{}
 		q.Add("corpora", "drive")
@@ -205,25 +197,18 @@ func (fetch *fetcher) allContent() ([]ds.Folder, []ds.File, error) {
 
 		req.URL.RawQuery = q.Encode()
 
-		res, err := client.Do(req)
+		res, err := fetch.withAuth(req)
 		if err != nil {
 			return nil, nil, err
 		}
 
-		if res.StatusCode != 200 {
-			res.Body.Close()
-
-			if err := fetch.mapError(res.StatusCode); err != nil {
-				return nil, nil, err
-			}
-
-			continue
+		type Response struct {
+			Files         []driveItem
+			NextPageToken string
 		}
 
-		decoder := json.NewDecoder(res.Body)
-		response := new(allContentResponse)
-		decoder.Decode(response)
-
+		response := new(Response)
+		json.NewDecoder(res.Body).Decode(response)
 		res.Body.Close()
 
 		newFolders, newFiles := convert(response.Files)
@@ -241,13 +226,6 @@ func (fetch *fetcher) allContent() ([]ds.Folder, []ds.File, error) {
 	return orderedFolders, files, nil
 }
 
-type changedContent struct {
-	Drive          ds.Drive
-	ChangedFiles   []ds.File
-	ChangedFolders []ds.Folder
-	RemovedIDs     []string
-}
-
 func (fetch *fetcher) changedContent(pageToken string) (*changedContent, error) {
 	var files []ds.File
 	var folders []ds.Folder
@@ -256,13 +234,7 @@ func (fetch *fetcher) changedContent(pageToken string) (*changedContent, error) 
 	drive := ds.Drive{ID: fetch.driveID}
 
 	for {
-		token, _, err := fetch.auth.AccessToken()
-		if err != nil {
-			return nil, err
-		}
-
 		req, _ := http.NewRequest("GET", fetch.baseURL+"/changes", nil)
-		req.Header.Add("Authorization", bearer(token))
 
 		q := url.Values{}
 		q.Add("driveId", fetch.driveID)
@@ -273,24 +245,19 @@ func (fetch *fetcher) changedContent(pageToken string) (*changedContent, error) 
 		q.Add("fields", "nextPageToken,newStartPageToken,changes(driveId,fileId,removed,drive(id,name),file(id,driveId,name,mimeType,parents,md5Checksum,size,trashed))")
 		req.URL.RawQuery = q.Encode()
 
-		res, err := client.Do(req)
+		res, err := fetch.withAuth(req)
 		if err != nil {
 			return nil, err
 		}
 
-		if res.StatusCode != 200 {
-			res.Body.Close()
-
-			if err := fetch.mapError(res.StatusCode); err != nil {
-				return nil, err
-			}
-
-			continue
+		type Response struct {
+			NextPageToken     string
+			NewStartPageToken string
+			Changes           []driveChange
 		}
 
-		response := new(changedContentResponse)
+		response := new(Response)
 		json.NewDecoder(res.Body).Decode(response)
-
 		res.Body.Close()
 
 		var changedItems []driveItem

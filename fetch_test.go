@@ -1,12 +1,15 @@
 package bernard
 
 import (
-	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"reflect"
 	"testing"
+	"time"
 
 	ds "github.com/m-rots/bernard/datastore"
 )
@@ -22,80 +25,152 @@ func (auth *mockAuth) AccessToken() (string, int64, error) {
 	return accessToken, 0, nil
 }
 
-func setupTest(handler http.HandlerFunc) (*fetcher, *httptest.Server) {
-	server := httptest.NewServer(http.HandlerFunc(handler))
-	fetch := &fetcher{
-		auth:    &mockAuth{},
-		driveID: driveID,
-		baseURL: server.URL,
-	}
-
-	return fetch, server
+type mockSleep struct {
+	called     int
+	calledWith []time.Duration
 }
 
-func TestDrive(t *testing.T) {
+func (sleep *mockSleep) Sleep(d time.Duration) {
+	sleep.called++
+	sleep.calledWith = append(sleep.calledWith, d)
+}
+
+func setupTest(handler http.HandlerFunc) (*fetcher, *httptest.Server, *mockSleep) {
+	server := httptest.NewServer(http.HandlerFunc(handler))
+	sleep := &mockSleep{}
+
+	fetch := &fetcher{
+		auth:    &mockAuth{},
+		client:  &http.Client{},
+		driveID: driveID,
+		baseURL: server.URL,
+		sleep:   sleep.Sleep,
+	}
+
+	return fetch, server, sleep
+}
+
+func TestExponentialBackoff(t *testing.T) {
 	var called int
 
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		called++
 
-		// check if request is retried
-		if called == 1 {
-			w.WriteHeader(500)
+		if called == 8 {
+			w.WriteHeader(200)
 			return
 		}
 
-		body := driveResponse{
-			Name: "Coolest Drive on earth",
-		}
-
-		json.NewEncoder(w).Encode(body)
+		w.WriteHeader(500)
 	}
 
-	fetch, server := setupTest(handler)
+	fetch, server, sleep := setupTest(handler)
 	defer server.Close()
 
-	name, err := fetch.drive()
+	req, _ := http.NewRequest("GET", fetch.baseURL, nil)
+	_, err := fetch.withAuth(req)
 	if err != nil {
-		t.Errorf("unexpected error: %s", err.Error())
-		return
+		t.Fatal(err)
 	}
 
-	if name != "Coolest Drive on earth" {
-		t.Errorf("Wrong name returned")
+	fmt.Println(sleep.calledWith)
+
+	if !reflect.DeepEqual(sleep.calledWith, []time.Duration{
+		1 * time.Second,
+		2 * time.Second,
+		4 * time.Second,
+		8 * time.Second,
+		16 * time.Second,
+		32 * time.Second,
+		32 * time.Second,
+	}) {
+		t.Error("Sleep not called with right values")
+	}
+}
+
+func TestDrive(t *testing.T) {
+	type Expected struct {
+		name string
+	}
+
+	type Test struct {
+		name     string
+		fixture  string
+		expected Expected
+	}
+
+	var testCases = []Test{
+		{
+			name:    "basic",
+			fixture: "testdata/drive/basic.json",
+			expected: Expected{
+				name: "Coolest Drive on Earth",
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			handler := func(w http.ResponseWriter, r *http.Request) {
+				http.ServeFile(w, r, tc.fixture)
+			}
+
+			fetch, server, _ := setupTest(handler)
+			defer server.Close()
+
+			name, err := fetch.drive()
+			if err != nil {
+				t.Errorf("unexpected error: %s", err.Error())
+				return
+			}
+
+			if name != tc.expected.name {
+				t.Errorf("Wrong name returned")
+			}
+		})
 	}
 }
 
 func TestPageToken(t *testing.T) {
-	var called int
-
-	handler := func(w http.ResponseWriter, r *http.Request) {
-		called++
-
-		// check if request is retried
-		if called == 1 {
-			w.WriteHeader(500)
-			return
-		}
-
-		body := pageTokenResponse{
-			StartPageToken: "100",
-		}
-
-		json.NewEncoder(w).Encode(body)
+	type Expected struct {
+		pageToken string
 	}
 
-	fetch, server := setupTest(handler)
-	defer server.Close()
-
-	pageToken, err := fetch.pageToken()
-	if err != nil {
-		t.Errorf("unexpected error: %s", err.Error())
-		return
+	type Test struct {
+		name     string
+		fixture  string
+		expected Expected
 	}
 
-	if pageToken != "100" {
-		t.Errorf("Wrong pageToken returned")
+	var testCases = []Test{
+		{
+			name:    "basic",
+			fixture: "testdata/page-token/basic.json",
+			expected: Expected{
+				pageToken: "100",
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			handler := func(w http.ResponseWriter, r *http.Request) {
+				http.ServeFile(w, r, tc.fixture)
+			}
+
+			fetch, server, _ := setupTest(handler)
+			defer server.Close()
+
+			pageToken, err := fetch.pageToken()
+			if err != nil {
+				t.Errorf("unexpected error: %s", err.Error())
+				return
+			}
+
+			if pageToken != tc.expected.pageToken {
+				t.Errorf("Wrong pageToken returned")
+			}
+		})
 	}
 }
 
@@ -186,18 +261,8 @@ func TestAllContent(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			var called int
-
 			fixturePath := tc.fixture
 			handler := func(w http.ResponseWriter, r *http.Request) {
-				called++
-
-				// check if request is retried
-				if called == 1 {
-					w.WriteHeader(500)
-					return
-				}
-
 				pageToken := r.URL.Query().Get("pageToken")
 				if pageToken != "" {
 					fixturePath = pageToken
@@ -206,7 +271,7 @@ func TestAllContent(t *testing.T) {
 				http.ServeFile(w, r, fixturePath)
 			}
 
-			fetch, server := setupTest(handler)
+			fetch, server, _ := setupTest(handler)
 			defer server.Close()
 
 			folders, files, err := fetch.allContent()
@@ -353,18 +418,8 @@ func TestChangedContent(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			var called int
-
 			fixturePath := tc.fixture
 			handler := func(w http.ResponseWriter, r *http.Request) {
-				called++
-
-				// check if request is retried
-				if called == 1 {
-					w.WriteHeader(500)
-					return
-				}
-
 				pageToken := r.URL.Query().Get("pageToken")
 				if pageToken != "" {
 					fixturePath = pageToken
@@ -373,7 +428,7 @@ func TestChangedContent(t *testing.T) {
 				http.ServeFile(w, r, fixturePath)
 			}
 
-			fetch, server := setupTest(handler)
+			fetch, server, _ := setupTest(handler)
 			defer server.Close()
 
 			diff, err := fetch.changedContent(tc.fixture)
@@ -414,57 +469,159 @@ func TestChangedContent(t *testing.T) {
 }
 
 func TestErrorResponses(t *testing.T) {
-	type test struct {
-		name        string
-		statusCode  int
-		targetError error
+	type Expected struct {
+		Err        error
+		StatusCode int
 	}
 
-	var testCases = []test{
-		{"401 returns ErrInvalidCredentials", 401, ErrInvalidCredentials},
-		{"403 returns ErrNetwork", 403, ErrNetwork},
-		{"404 returns ErrNotFound", 404, ErrNotFound},
+	type Test struct {
+		Name       string
+		Fixture    string
+		StatusCode int
+		Retry      bool
+		Expected   error
+	}
+
+	var testCases = []Test{
+		{
+			Name:       "badRequest (400)",
+			Fixture:    "testdata/errors/400/badRequest.json",
+			Retry:      false,
+			StatusCode: 400,
+			Expected:   ErrNetwork,
+		},
+		{
+			Name:       "invalidSharingRequest (400)",
+			Fixture:    "testdata/errors/400/invalidSharingRequest.json",
+			Retry:      false,
+			StatusCode: 400,
+			Expected:   ErrNetwork,
+		},
+		{
+			Name:       "authError (401)",
+			Fixture:    "testdata/errors/401/authError.json",
+			Retry:      false,
+			StatusCode: 401,
+			Expected:   ErrInvalidCredentials,
+		},
+		{
+			Name:       "dailyLimitExceeded (403)",
+			Fixture:    "testdata/errors/403/dailyLimitExceeded.json",
+			Retry:      false,
+			StatusCode: 403,
+			Expected:   ErrNetwork,
+		},
+		{
+			Name:       "userRateLimitExceeded (403)",
+			Fixture:    "testdata/errors/403/userRateLimitExceeded.json",
+			Retry:      true,
+			StatusCode: 403,
+			Expected:   nil,
+		},
+		{
+			Name:       "rateLimitExceeded (403)",
+			Fixture:    "testdata/errors/403/rateLimitExceeded.json",
+			Retry:      true,
+			StatusCode: 403,
+			Expected:   nil,
+		},
+		{
+			Name:       "sharingRateLimitExceeded (403)",
+			Fixture:    "testdata/errors/403/sharingRateLimitExceeded.json",
+			Retry:      false,
+			StatusCode: 403,
+			Expected:   ErrNetwork,
+		},
+		{
+			Name:       "appNotAuthorizedToFile (403)",
+			Fixture:    "testdata/errors/403/appNotAuthorizedToFile.json",
+			Retry:      false,
+			StatusCode: 403,
+			Expected:   ErrNetwork,
+		},
+		{
+			Name:       "insufficientFilePermissions (403)",
+			Fixture:    "testdata/errors/403/insufficientFilePermissions.json",
+			Retry:      false,
+			StatusCode: 403,
+			Expected:   ErrNetwork,
+		},
+		{
+			Name:       "domainPolicy (403)",
+			Fixture:    "testdata/errors/403/domainPolicy.json",
+			Retry:      false,
+			StatusCode: 403,
+			Expected:   ErrNetwork,
+		},
+		{
+			Name:       "notFound (404)",
+			Fixture:    "testdata/errors/404/notFound.json",
+			Retry:      false,
+			StatusCode: 404,
+			Expected:   ErrNotFound,
+		},
+		{
+			Name:       "rateLimitExceeded (429)",
+			Fixture:    "testdata/errors/429/rateLimitExceeded.json",
+			Retry:      true,
+			StatusCode: 429,
+			Expected:   nil,
+		},
+		{
+			Name:       "backendError (500)",
+			Fixture:    "testdata/errors/500/backendError.json",
+			Retry:      true,
+			StatusCode: 500,
+			Expected:   nil,
+		},
 	}
 
 	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
+		t.Run(tc.Name, func(t *testing.T) {
+			var called int
+
 			handler := func(w http.ResponseWriter, r *http.Request) {
-				if r.Header.Get("authorization") != bearer(accessToken) {
+				called++
+
+				if r.Header.Get("authorization") != "Bearer "+accessToken {
 					w.WriteHeader(401)
 					return
 				}
 
-				w.WriteHeader(tc.statusCode)
-			}
+				if !tc.Retry && called > 1 {
+					t.Fatal("Retrying when not intended")
+				}
 
-			fetch, server := setupTest(handler)
-			defer server.Close()
+				if called == 2 {
+					w.WriteHeader(200)
+					return
+				}
 
-			compareError := func(err error) {
-				if !errors.Is(err, tc.targetError) {
-					t.Errorf("Wrong error returned")
+				w.WriteHeader(tc.StatusCode)
+
+				// cannot set statusCode twice, so instead open the file manually
+				f, err := os.Open(tc.Fixture)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				defer f.Close()
+
+				_, err = io.Copy(w, f)
+				if err != nil {
+					t.Fatal(err)
 				}
 			}
 
-			t.Run("drive", func(t *testing.T) {
-				_, err := fetch.drive()
-				compareError(err)
-			})
+			fetch, server, _ := setupTest(handler)
+			defer server.Close()
 
-			t.Run("pageToken", func(t *testing.T) {
-				_, err := fetch.pageToken()
-				compareError(err)
-			})
+			req, _ := http.NewRequest("GET", fetch.baseURL, nil)
+			_, err := fetch.withAuth(req)
 
-			t.Run("allContent", func(t *testing.T) {
-				_, _, err := fetch.allContent()
-				compareError(err)
-			})
-
-			t.Run("changedContent", func(t *testing.T) {
-				_, err := fetch.changedContent("pageToken")
-				compareError(err)
-			})
+			if !errors.Is(err, tc.Expected) {
+				t.Errorf("Unexpected error: %s", err.Error())
+			}
 		})
 	}
 }

@@ -2,6 +2,8 @@ package bernard
 
 import (
 	"errors"
+	"net/http"
+	"time"
 
 	ds "github.com/m-rots/bernard/datastore"
 )
@@ -13,8 +15,8 @@ type Authenticator interface {
 
 // Bernard is a synchronisation backend for Google Drive.
 type Bernard struct {
-	fetch   fetcher
 	driveID string
+	fetch   fetcher
 	store   ds.Datastore
 }
 
@@ -25,7 +27,11 @@ func New(driveID string, auth Authenticator, store ds.Datastore) *Bernard {
 	fetch := fetcher{
 		auth:    auth,
 		baseURL: baseURL,
+		client: &http.Client{
+			Timeout: 15 * time.Second,
+		},
 		driveID: driveID,
+		sleep:   time.Sleep,
 	}
 
 	return &Bernard{
