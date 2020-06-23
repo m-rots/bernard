@@ -1,0 +1,13 @@
+{
+  "error": {
+    "errors": [
+      {
+        "domain": "usageLimits",
+        "reason": "rateLimitExceeded",
+        "message": "Rate Limit Exceeded"
+      }
+    ],
+    "code": 429,
+    "message": "Rate Limit Exceeded"
+  }
+}

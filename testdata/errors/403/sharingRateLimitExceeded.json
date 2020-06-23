@@ -1,0 +1,13 @@
+{
+  "error": {
+   "errors": [
+    {
+     "domain": "global",
+     "message": "Rate limit exceeded. User message: \"These item(s) could not be shared because a rate limit was exceeded: filename",
+     "reason": "sharingRateLimitExceeded"
+    }
+   ],
+   "code": 403,
+   "message": "Rate Limit Exceeded"
+  }
+ }

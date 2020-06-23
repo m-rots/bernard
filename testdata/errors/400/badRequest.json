@@ -1,0 +1,15 @@
+{
+  "error": {
+    "code": 400,
+    "errors": [
+      {
+        "domain": "global",
+        "location": "orderBy",
+        "locationType": "parameter",
+        "message": "Sorting is not supported for queries with fullText terms. Results are always in descending relevance order.",
+        "reason": "badRequest"
+      }
+    ],
+    "message": "Sorting is not supported for queries with fullText terms. Results are always in descending relevance order."
+  }
+}

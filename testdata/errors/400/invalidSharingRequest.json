@@ -1,0 +1,13 @@
+{
+  "error": {
+    "errors": [
+      {
+        "domain": "global",
+        "reason": "invalidSharingRequest",
+        "message": "Bad Request. User message: \"Sorry, the items were successfully shared but emails could not be sent to email@domain.com.\""
+      }
+    ],
+    "code": 400,
+    "message": "Bad Request"
+  }
+}
