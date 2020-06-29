@@ -83,12 +83,12 @@ func main() {
 		"https://www.googleapis.com/auth/iam",
 	})
 
-	bernard := lowe.New(driveID, auth, store)
+	bernard := lowe.New(auth, store)
 
 	if fullSync {
 		fmt.Printf("%slog%s - Starting full sync for the first time\n", colourMagenta, colourReset)
 		fmt.Println("A full sync takes about 1-2 seconds for every 1000 files. This could take a while...")
-		err = bernard.FullSync()
+		err = bernard.FullSync(driveID)
 		if err != nil {
 			if errors.Is(err, ds.ErrDataAnomaly) {
 				fmt.Printf("\n%swarning%s - A data anomaly occured.\n", colourYellow, colourReset)
@@ -113,7 +113,7 @@ func main() {
 	fmt.Printf("%slog%s - Syncing changes from Google Drive\n", colourMagenta, colourReset)
 
 	hook, diff := store.NewDifferencesHook()
-	err = bernard.PartialSync(hook)
+	err = bernard.PartialSync(driveID, hook)
 	if err != nil {
 		if errors.Is(err, ds.ErrDataAnomaly) {
 			fmt.Printf("\n%swarning%s - A data anomaly occured. Please try again in 30 seconds.\n", colourYellow, colourReset)
@@ -141,8 +141,8 @@ func main() {
 		}
 
 		fmt.Printf("%slog%s - Running full sync to act as reference state\n", colourMagenta, colourReset)
-		reference := lowe.New(driveID, auth, memStore)
-		err = reference.FullSync()
+		reference := lowe.New(auth, memStore)
+		err = reference.FullSync(driveID)
 		if err != nil {
 			if errors.Is(err, ds.ErrDataAnomaly) {
 				fmt.Printf("\n%swarning%s - Changes were propagated but a data anomaly occured during the full sync.\n", colourYellow, colourReset)

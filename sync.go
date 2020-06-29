@@ -5,24 +5,30 @@ import (
 )
 
 // FullSync syncs the entire content of Drive to the datastore.
-func (bernard *Bernard) FullSync() error {
-	name, err := bernard.fetch.drive()
+func (bernard *Bernard) FullSync(driveID string) error {
+	startPageToken, err := bernard.fetch.pageToken(driveID)
 	if err != nil {
 		return err
 	}
 
-	startPageToken, err := bernard.fetch.pageToken()
+	// To prevent possible missing data, a sleep of 1-5 minutes
+	// between the pageToken and FullSync can be enabled.
+	if bernard.safeSleep > 0 {
+		bernard.fetch.sleep(bernard.safeSleep)
+	}
+
+	name, err := bernard.fetch.drive(driveID)
 	if err != nil {
 		return err
 	}
 
 	drive := ds.Drive{
-		ID:        bernard.driveID,
+		ID:        driveID,
 		Name:      name,
 		PageToken: startPageToken,
 	}
 
-	folders, files, err := bernard.fetch.allContent()
+	folders, files, err := bernard.fetch.allContent(driveID)
 	if err != nil {
 		return err
 	}
@@ -58,13 +64,13 @@ type Hook = func(drive ds.Drive, files []ds.File, folders []ds.Folder, removed [
 // PartialSync syncs the latest changes within the Drive to the underlying datastore.
 //
 // Optionally, you can provide one or multiple Hooks to get insight into the fetched changes.
-func (bernard *Bernard) PartialSync(hooks ...Hook) error {
-	pageToken, err := bernard.store.PageToken(bernard.driveID)
+func (bernard *Bernard) PartialSync(driveID string, hooks ...Hook) error {
+	pageToken, err := bernard.store.PageToken(driveID)
 	if err != nil {
 		return err
 	}
 
-	diff, err := bernard.fetch.changedContent(pageToken)
+	diff, err := bernard.fetch.changedContent(driveID, pageToken)
 	if err != nil {
 		return err
 	}

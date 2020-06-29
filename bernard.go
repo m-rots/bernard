@@ -15,30 +15,76 @@ type Authenticator interface {
 
 // Bernard is a synchronisation backend for Google Drive.
 type Bernard struct {
-	driveID string
-	fetch   fetcher
-	store   ds.Datastore
+	safeSleep time.Duration
+
+	fetch *fetcher
+	store ds.Datastore
+}
+
+// An Option can override some of the default Bernard values.
+type Option func(*Bernard)
+
+// WithClient allows one to override the default HTTP client.
+func WithClient(client *http.Client) Option {
+	return func(bernard *Bernard) {
+		bernard.fetch.client = client
+	}
+}
+
+// WithPreRequestHook allows one to apply rate-limiting before every request.
+//
+// This function is called before fetching the authentication token to prevent
+// tokens from expiring when a rate-limit is applied.
+func WithPreRequestHook(preHook func()) Option {
+	return func(bernard *Bernard) {
+		bernard.fetch.preHook = preHook
+	}
+}
+
+// WithJSONDecoder allows one to replace Go's default JSON decoding
+// with a more memory-efficient and quicker solution.
+func WithJSONDecoder(d jsonDecoder) Option {
+	return func(bernard *Bernard) {
+		bernard.fetch.decodeJSON = d
+	}
+}
+
+// WithSafeSleep allows one to sleep between the pageToken fetch and
+// the full sync. Setting this between 1 and 5 minutes prevents
+// any data from going rogue when changes are actively being made
+// to the Shared Drive.
+//
+// The default value of safeSleep is set at 0.
+func WithSafeSleep(duration time.Duration) Option {
+	return func(bernard *Bernard) {
+		bernard.safeSleep = duration
+	}
 }
 
 // New creates a new instance of Bernard
-func New(driveID string, auth Authenticator, store ds.Datastore) *Bernard {
+func New(auth Authenticator, store ds.Datastore, opts ...Option) *Bernard {
 	const baseURL string = "https://www.googleapis.com/drive/v3"
 
-	fetch := fetcher{
+	fetch := &fetcher{
 		auth:    auth,
 		baseURL: baseURL,
 		client: &http.Client{
 			Timeout: 15 * time.Second,
 		},
-		driveID: driveID,
-		sleep:   time.Sleep,
+		decodeJSON: decodeJSON,
+		sleep:      time.Sleep,
 	}
 
-	return &Bernard{
-		driveID: driveID,
-		fetch:   fetch,
-		store:   store,
+	bernard := &Bernard{
+		fetch: fetch,
+		store: store,
 	}
+
+	for _, opt := range opts {
+		opt(bernard)
+	}
+
+	return bernard
 }
 
 // ErrInvalidCredentials can occur when the wrong authentication scopes are used,
