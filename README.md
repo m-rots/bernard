@@ -83,7 +83,7 @@ To create a DifferencesHook, you can utilise the following code:
 
 ```go
 hook, diff := store.NewDifferencesHook()
-err = bernard.PartialSync(hook)
+err = bernard.PartialSync("driveID", hook)
 
 // access diff
 ```
@@ -93,8 +93,8 @@ The `Difference` struct contains:
 
 - `AddedFiles`, a slice of files not currently present in the datastore.
 - `AddedFolders`, a slice of folders not currently present in the datastore.
-- `ChangedFiles`, a slice of files currently present in the datastore with updated values.
-- `ChangedFolders`, a slice of folders currently present in the datastore with updated values.
+- `ChangedFiles`, a slice of FileDifferences, providing both the old and new state.
+- `ChangedFolders`, a slice of FolderDifferences, providing both the old and new state.
 - `RemovedFiles`, a slice of removed files with their last-known state stored by the datastore.
 - `RemovedFolders`, a slice of removed folders with their last-known state stored by the datastore.
 
@@ -170,15 +170,15 @@ func main() {
     os.Exit(1)
   }
 
-  bernie := bernard.New(driveID, authenticator, store)
+  bernie := bernard.New(authenticator, store)
 
-  err = bernie.FullSync()
+  err = bernie.FullSync(driveID)
   if err != nil {
     fmt.Println("Could not fully synchronise the drive")
     os.Exit(1)
   }
 
-  err = bernie.PartialSync()
+  err = bernie.PartialSync(driveID)
   if err != nil {
     fmt.Println("Could not partially synchronise the drive")
     os.Exit(1)
