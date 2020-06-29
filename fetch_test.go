@@ -42,7 +42,6 @@ func setupTest(handler http.HandlerFunc) (*fetcher, *httptest.Server, *mockSleep
 	fetch := &fetcher{
 		auth:    &mockAuth{},
 		client:  &http.Client{},
-		driveID: driveID,
 		baseURL: server.URL,
 		sleep:   sleep.Sleep,
 	}
@@ -118,7 +117,7 @@ func TestDrive(t *testing.T) {
 			fetch, server, _ := setupTest(handler)
 			defer server.Close()
 
-			name, err := fetch.drive()
+			name, err := fetch.drive(driveID)
 			if err != nil {
 				t.Errorf("unexpected error: %s", err.Error())
 				return
@@ -161,7 +160,7 @@ func TestPageToken(t *testing.T) {
 			fetch, server, _ := setupTest(handler)
 			defer server.Close()
 
-			pageToken, err := fetch.pageToken()
+			pageToken, err := fetch.pageToken(driveID)
 			if err != nil {
 				t.Errorf("unexpected error: %s", err.Error())
 				return
@@ -274,7 +273,7 @@ func TestAllContent(t *testing.T) {
 			fetch, server, _ := setupTest(handler)
 			defer server.Close()
 
-			folders, files, err := fetch.allContent()
+			folders, files, err := fetch.allContent(driveID)
 			if err != nil {
 				t.Errorf("AllContent returned an error: %s", err.Error())
 				return
@@ -431,7 +430,7 @@ func TestChangedContent(t *testing.T) {
 			fetch, server, _ := setupTest(handler)
 			defer server.Close()
 
-			diff, err := fetch.changedContent(tc.fixture)
+			diff, err := fetch.changedContent(driveID, tc.fixture)
 			if err != nil {
 				t.Errorf("ChangedContent returned an error: %s", err.Error())
 				return

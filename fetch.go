@@ -60,7 +60,6 @@ type fetcher struct {
 	auth    Authenticator
 	baseURL string
 	client  *http.Client
-	driveID string
 	sleep   func(time.Duration)
 }
 
@@ -122,18 +121,18 @@ func (fetch *fetcher) withAuth(req *http.Request) (res *http.Response, err error
 				return nil, fmt.Errorf("%v: %w", response.Error.Message, ErrNetwork)
 			}
 		case 404:
-			return nil, fmt.Errorf("%v: %w", fetch.driveID, ErrNotFound)
+			return nil, fmt.Errorf("%v: %w", response.Error.Message, ErrNotFound)
 		default:
 			return nil, fmt.Errorf("%v: %w", response.Error.Message, ErrNetwork)
 		}
 	}
 }
 
-func (fetch *fetcher) pageToken() (string, error) {
+func (fetch *fetcher) pageToken(driveID string) (string, error) {
 	req, _ := http.NewRequest("GET", fetch.baseURL+"/changes/startPageToken", nil)
 
 	q := url.Values{}
-	q.Add("driveId", fetch.driveID)
+	q.Add("driveId", driveID)
 	q.Add("supportsAllDrives", "true")
 	req.URL.RawQuery = q.Encode()
 
@@ -153,8 +152,8 @@ func (fetch *fetcher) pageToken() (string, error) {
 	return response.StartPageToken, nil
 }
 
-func (fetch *fetcher) drive() (string, error) {
-	req, _ := http.NewRequest("GET", fetch.baseURL+"/drives/"+fetch.driveID, nil)
+func (fetch *fetcher) drive(driveID string) (string, error) {
+	req, _ := http.NewRequest("GET", fetch.baseURL+"/drives/"+driveID, nil)
 
 	q := url.Values{}
 	q.Add("fields", "name")
@@ -176,7 +175,7 @@ func (fetch *fetcher) drive() (string, error) {
 	return response.Name, nil
 }
 
-func (fetch *fetcher) allContent() ([]ds.Folder, []ds.File, error) {
+func (fetch *fetcher) allContent(driveID string) ([]ds.Folder, []ds.File, error) {
 	var files []ds.File
 	var folders []ds.Folder
 	var pageToken string
@@ -186,7 +185,7 @@ func (fetch *fetcher) allContent() ([]ds.Folder, []ds.File, error) {
 
 		q := url.Values{}
 		q.Add("corpora", "drive")
-		q.Add("driveId", fetch.driveID)
+		q.Add("driveId", driveID)
 		q.Add("pageSize", "1000")
 		q.Add("includeItemsFromAllDrives", "true")
 		q.Add("supportsAllDrives", "true")
@@ -226,18 +225,18 @@ func (fetch *fetcher) allContent() ([]ds.Folder, []ds.File, error) {
 	return orderedFolders, files, nil
 }
 
-func (fetch *fetcher) changedContent(pageToken string) (*changedContent, error) {
+func (fetch *fetcher) changedContent(driveID string, pageToken string) (*changedContent, error) {
 	var files []ds.File
 	var folders []ds.Folder
 	var removedIDs []string
 
-	drive := ds.Drive{ID: fetch.driveID}
+	drive := ds.Drive{ID: driveID}
 
 	for {
 		req, _ := http.NewRequest("GET", fetch.baseURL+"/changes", nil)
 
 		q := url.Values{}
-		q.Add("driveId", fetch.driveID)
+		q.Add("driveId", driveID)
 		q.Add("pageSize", "1000")
 		q.Add("pageToken", pageToken)
 		q.Add("includeItemsFromAllDrives", "true")
@@ -272,7 +271,7 @@ func (fetch *fetcher) changedContent(pageToken string) (*changedContent, error) 
 				continue
 			}
 
-			if change.Removed || change.File.DriveID != fetch.driveID {
+			if change.Removed || change.File.DriveID != driveID {
 				removedIDs = append(removedIDs, change.FileID)
 			} else {
 				changedItems = append(changedItems, change.File)
