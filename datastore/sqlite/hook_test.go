@@ -85,10 +85,19 @@ func TestDifferenceHook(t *testing.T) {
 				},
 			},
 			expected: &Difference{
-				ChangedFolders: []ds.Folder{
-					{ID: "A", Name: "new name", Parent: "drive", Trashed: false}, // name
-					{ID: "B", Name: "folder b", Parent: "A", Trashed: false},     // parent
-					{ID: "C", Name: "folder c", Parent: "B", Trashed: true},      // trashed
+				ChangedFolders: []FolderDifference{
+					{ // name
+						Old: ds.Folder{ID: "A", Name: "old name", Parent: "drive", Trashed: false},
+						New: ds.Folder{ID: "A", Name: "new name", Parent: "drive", Trashed: false},
+					},
+					{ // parent
+						Old: ds.Folder{ID: "B", Name: "folder b", Parent: "drive", Trashed: false},
+						New: ds.Folder{ID: "B", Name: "folder b", Parent: "A", Trashed: false},
+					},
+					{ // trashed
+						Old: ds.Folder{ID: "C", Name: "folder c", Parent: "B", Trashed: false},
+						New: ds.Folder{ID: "C", Name: "folder c", Parent: "B", Trashed: true},
+					},
 				},
 			},
 		},
@@ -119,12 +128,27 @@ func TestDifferenceHook(t *testing.T) {
 				},
 			},
 			expected: &Difference{
-				ChangedFiles: []ds.File{
-					{ID: "Z", MD5: "new md5", Name: "file Z", Parent: "drive", Size: 10, Trashed: false}, // md5
-					{ID: "Y", MD5: "YYY md5", Name: "new name", Parent: "A", Size: 20, Trashed: true},    // name
-					{ID: "X", MD5: "XXX md5", Name: "file X", Parent: "drive", Size: 30, Trashed: false}, // parent
-					{ID: "W", MD5: "WWW md5", Name: "file W", Parent: "A", Size: 80, Trashed: false},     // size
-					{ID: "V", MD5: "VVV md5", Name: "file V", Parent: "A", Size: 50, Trashed: false},     // trashed
+				ChangedFiles: []FileDifference{
+					{ // md5
+						Old: ds.File{ID: "Z", MD5: "old md5", Name: "file Z", Parent: "drive", Size: 10, Trashed: false},
+						New: ds.File{ID: "Z", MD5: "new md5", Name: "file Z", Parent: "drive", Size: 10, Trashed: false},
+					},
+					{ // name
+						Old: ds.File{ID: "Y", MD5: "YYY md5", Name: "old name", Parent: "A", Size: 20, Trashed: true},
+						New: ds.File{ID: "Y", MD5: "YYY md5", Name: "new name", Parent: "A", Size: 20, Trashed: true},
+					},
+					{ // parent
+						Old: ds.File{ID: "X", MD5: "XXX md5", Name: "file X", Parent: "A", Size: 30, Trashed: false},
+						New: ds.File{ID: "X", MD5: "XXX md5", Name: "file X", Parent: "drive", Size: 30, Trashed: false},
+					},
+					{ // size
+						Old: ds.File{ID: "W", MD5: "WWW md5", Name: "file W", Parent: "A", Size: 40, Trashed: false},
+						New: ds.File{ID: "W", MD5: "WWW md5", Name: "file W", Parent: "A", Size: 80, Trashed: false},
+					},
+					{ // trashed
+						Old: ds.File{ID: "V", MD5: "VVV md5", Name: "file V", Parent: "A", Size: 50, Trashed: true},
+						New: ds.File{ID: "V", MD5: "VVV md5", Name: "file V", Parent: "A", Size: 50, Trashed: false},
+					},
 				},
 			},
 		},

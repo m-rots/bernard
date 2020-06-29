@@ -13,12 +13,22 @@ import (
 // between two states.
 type Difference struct {
 	AddedFiles   []ds.File
-	ChangedFiles []ds.File
+	ChangedFiles []FileDifference
 	RemovedFiles []ds.File
 
 	AddedFolders   []ds.Folder
-	ChangedFolders []ds.Folder
+	ChangedFolders []FolderDifference
 	RemovedFolders []ds.Folder
+}
+
+type FolderDifference struct {
+	Old ds.Folder
+	New ds.Folder
+}
+
+type FileDifference struct {
+	Old ds.File
+	New ds.File
 }
 
 // NewDifferencesHook creates a Hook which checks which files and folders
@@ -56,7 +66,7 @@ func (store *Datastore) NewDifferencesHook() (bernard.Hook, *Difference) {
 			// If any of the fields do not align between the old and new state,
 			// then this folder must have been changed.
 			if f.Name != folder.Name || f.Parent != folder.Parent || f.Trashed != folder.Trashed {
-				diff.ChangedFolders = append(diff.ChangedFolders, folder)
+				diff.ChangedFolders = append(diff.ChangedFolders, FolderDifference{Old: f, New: folder})
 			}
 		}
 
@@ -86,7 +96,7 @@ func (store *Datastore) NewDifferencesHook() (bernard.Hook, *Difference) {
 			// If any of the fields do not align between the old and new state,
 			// then this file must have been changed.
 			if f.Name != file.Name || f.Parent != file.Parent || f.Trashed != file.Trashed || f.Size != file.Size || f.MD5 != file.MD5 {
-				diff.ChangedFiles = append(diff.ChangedFiles, file)
+				diff.ChangedFiles = append(diff.ChangedFiles, FileDifference{Old: f, New: file})
 			}
 		}
 

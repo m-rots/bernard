@@ -197,16 +197,16 @@ func printDifference(diff *sqlite.Difference) {
 	// print changed folders
 	if len(diff.ChangedFolders) > 0 {
 		fmt.Println("\nChanged folders:")
-		for _, f := range diff.ChangedFolders {
-			fmt.Printf("%schanged%s - %s - %s\n", colourYellow, colourReset, f.ID, f.Name)
+		for _, d := range diff.ChangedFolders {
+			fmt.Printf("%schanged%s - %s - %s\n", colourYellow, colourReset, d.New.ID, d.New.Name)
 		}
 	}
 
 	// print changed files
 	if len(diff.ChangedFiles) > 0 {
 		fmt.Println("\nChanged files:")
-		for _, f := range diff.ChangedFiles {
-			fmt.Printf("%schanged%s - %s - %s\n", colourYellow, colourReset, f.ID, f.Name)
+		for _, d := range diff.ChangedFiles {
+			fmt.Printf("%schanged%s - %s - %s\n", colourYellow, colourReset, d.New.ID, d.New.Name)
 		}
 	}
 
