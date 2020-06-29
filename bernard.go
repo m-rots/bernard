@@ -31,6 +31,24 @@ func WithClient(client *http.Client) Option {
 	}
 }
 
+// WithPreRequestHook allows one to apply rate-limiting before every request.
+//
+// This function is called before fetching the authentication token to prevent
+// tokens from expiring when a rate-limit is applied.
+func WithPreRequestHook(preHook func()) Option {
+	return func(bernard *Bernard) {
+		bernard.fetch.preHook = preHook
+	}
+}
+
+// WithJSONDecoder allows one to replace Go's default JSON decoding
+// with a more memory-efficient and quicker solution.
+func WithJSONDecoder(d jsonDecoder) Option {
+	return func(bernard *Bernard) {
+		bernard.fetch.decodeJSON = d
+	}
+}
+
 // WithSafeSleep allows one to sleep between the pageToken fetch and
 // the full sync. Setting this between 1 and 5 minutes prevents
 // any data from going rogue when changes are actively being made
@@ -53,7 +71,8 @@ func New(auth Authenticator, store ds.Datastore, opts ...Option) *Bernard {
 		client: &http.Client{
 			Timeout: 15 * time.Second,
 		},
-		sleep: time.Sleep,
+		decodeJSON: decodeJSON,
+		sleep:      time.Sleep,
 	}
 
 	bernard := &Bernard{

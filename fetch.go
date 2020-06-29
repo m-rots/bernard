@@ -3,6 +3,7 @@ package bernard
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"net/url"
@@ -61,6 +62,16 @@ type fetcher struct {
 	baseURL string
 	client  *http.Client
 	sleep   func(time.Duration)
+
+	preHook    func()
+	decodeJSON jsonDecoder
+}
+
+type jsonDecoder func(r io.Reader, v interface{}) error
+
+// standard JSON decoder
+func decodeJSON(r io.Reader, v interface{}) error {
+	return json.NewDecoder(r).Decode(v)
 }
 
 func (fetch *fetcher) withAuth(req *http.Request) (res *http.Response, err error) {
@@ -83,6 +94,11 @@ func (fetch *fetcher) withAuth(req *http.Request) (res *http.Response, err error
 
 	// for loop to retry if necessary
 	for {
+		// preHook if anyone wants to apply rate-limiting.
+		if fetch.preHook != nil {
+			fetch.preHook()
+		}
+
 		token, _, err := fetch.auth.AccessToken()
 		if err != nil {
 			return nil, err
@@ -99,7 +115,7 @@ func (fetch *fetcher) withAuth(req *http.Request) (res *http.Response, err error
 		}
 
 		response := new(errorResponse)
-		json.NewDecoder(res.Body).Decode(response)
+		fetch.decodeJSON(res.Body, response)
 		res.Body.Close()
 
 		switch res.StatusCode {
@@ -146,7 +162,7 @@ func (fetch *fetcher) pageToken(driveID string) (string, error) {
 	}
 
 	response := new(Response)
-	json.NewDecoder(res.Body).Decode(response)
+	fetch.decodeJSON(res.Body, response)
 	res.Body.Close()
 
 	return response.StartPageToken, nil
@@ -169,7 +185,7 @@ func (fetch *fetcher) drive(driveID string) (string, error) {
 	}
 
 	response := new(Response)
-	json.NewDecoder(res.Body).Decode(response)
+	fetch.decodeJSON(res.Body, response)
 	res.Body.Close()
 
 	return response.Name, nil
@@ -207,7 +223,7 @@ func (fetch *fetcher) allContent(driveID string) ([]ds.Folder, []ds.File, error)
 		}
 
 		response := new(Response)
-		json.NewDecoder(res.Body).Decode(response)
+		fetch.decodeJSON(res.Body, response)
 		res.Body.Close()
 
 		newFolders, newFiles := convert(response.Files)
@@ -256,7 +272,7 @@ func (fetch *fetcher) changedContent(driveID string, pageToken string) (*changed
 		}
 
 		response := new(Response)
-		json.NewDecoder(res.Body).Decode(response)
+		fetch.decodeJSON(res.Body, response)
 		res.Body.Close()
 
 		var changedItems []driveItem

@@ -40,10 +40,11 @@ func setupTest(handler http.HandlerFunc) (*fetcher, *httptest.Server, *mockSleep
 	sleep := &mockSleep{}
 
 	fetch := &fetcher{
-		auth:    &mockAuth{},
-		client:  &http.Client{},
-		baseURL: server.URL,
-		sleep:   sleep.Sleep,
+		auth:       &mockAuth{},
+		client:     &http.Client{},
+		decodeJSON: decodeJSON,
+		baseURL:    server.URL,
+		sleep:      sleep.Sleep,
 	}
 
 	return fetch, server, sleep
