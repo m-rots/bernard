@@ -17,7 +17,7 @@ type driveItem struct {
 	Name        string
 	MimeType    string
 	Parents     []string
-	Size        int `json:"size,string"`
+	Size        uint64 `json:"size,string"`
 	MD5Checksum string
 	Trashed     bool
 	DriveID     string

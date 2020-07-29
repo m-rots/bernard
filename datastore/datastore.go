@@ -29,7 +29,7 @@ type File struct {
 	Name    string
 	Parent  string
 	Trashed bool
-	Size    int
+	Size    uint64
 	MD5     string
 }
 
