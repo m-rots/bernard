@@ -237,7 +237,7 @@ func (fetch *fetcher) allContent(driveID string) ([]ds.Folder, []ds.File, error)
 		}
 	}
 
-	orderedFolders := orderFoldersOnHierarchy(folders)
+	orderedFolders := ds.OrderFoldersOnHierarchy(folders)
 	return orderedFolders, files, nil
 }
 
@@ -306,7 +306,7 @@ func (fetch *fetcher) changedContent(driveID string, pageToken string) (*changed
 		}
 	}
 
-	orderedFolders := orderFoldersOnHierarchy(folders)
+	orderedFolders := ds.OrderFoldersOnHierarchy(folders)
 
 	output := &changedContent{
 		Drive:          drive,
@@ -344,39 +344,4 @@ func convert(content []driveItem) (folders []ds.Folder, files []ds.File) {
 	}
 
 	return folders, files
-}
-
-func rootFolders(folders []ds.Folder) (roots []ds.Folder, nonRoots []ds.Folder) {
-	IDtoParent := make(map[string]string)
-	IDtoFolder := make(map[string]ds.Folder)
-
-	for _, folder := range folders {
-		IDtoParent[folder.ID] = folder.Parent
-		IDtoFolder[folder.ID] = folder
-	}
-
-	for _, f := range folders {
-		if _, ok := IDtoParent[f.Parent]; ok {
-			nonRoots = append(nonRoots, IDtoFolder[f.ID])
-		} else {
-			roots = append(roots, IDtoFolder[f.ID])
-		}
-	}
-
-	return roots, nonRoots
-}
-
-func orderFoldersOnHierarchy(nonRoots []ds.Folder) (ordered []ds.Folder) {
-	for {
-		if len(nonRoots) == 0 {
-			break
-		}
-
-		roots, newNonRoots := rootFolders(nonRoots)
-		nonRoots = newNonRoots
-
-		ordered = append(ordered, roots...)
-	}
-
-	return ordered
 }
