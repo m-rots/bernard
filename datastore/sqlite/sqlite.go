@@ -21,7 +21,16 @@ func New(path string) (*Datastore, error) {
 		return nil, fmt.Errorf("open: %w", ds.ErrDatabase)
 	}
 
-	if _, err := db.Exec(sqlSchema); err != nil {
+	if _, err := db.Exec(Schema); err != nil {
+		return nil, fmt.Errorf("schema: %w", ds.ErrDatabase)
+	}
+
+	return &Datastore{DB: db}, nil
+}
+
+// FromDB returns a Bernard Datastore with the given SQLite3 backend.
+func FromDB(db *sql.DB) (*Datastore, error) {
+	if _, err := db.Exec(Schema); err != nil {
 		return nil, fmt.Errorf("schema: %w", ds.ErrDatabase)
 	}
 
@@ -248,7 +257,8 @@ func (store *Datastore) PageToken(driveID string) (string, error) {
 	return pageToken, nil
 }
 
-const sqlSchema string = `
+// Schema of the sqlite database
+const Schema string = `
 PRAGMA foreign_keys=ON;
 
 CREATE TABLE IF NOT EXISTS file (
